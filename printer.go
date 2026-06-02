@@ -15,6 +15,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/phpdave11/gofpdf"
 )
 
 type PrinterInfo struct {
@@ -144,6 +146,14 @@ func ProcessPrintJob(
 		return fmt.Errorf("HOT_FOLDER_PATH nao configurado")
 	}
 
+	if apiURL == "" {
+		return fmt.Errorf("API_URL nao configurado - verifique as configuracoes do agente")
+	}
+
+	if _, err := url.Parse(apiURL); err != nil {
+		return fmt.Errorf("API_URL invalido (%q) - verifique as configuracoes do agente", apiURL)
+	}
+
 	if err := os.MkdirAll(hotFolderPath, 0755); err != nil {
 		return fmt.Errorf("criar hot folder: %w", err)
 	}
@@ -249,16 +259,43 @@ func printFileToPrinterWindows(filePath string, printerName string) error {
 		printerName,
 	)
 
+	if ext == ".pdf" {
+		return printPDFViaSumatra(filePath, printerName)
+	}
+
 	switch ext {
 	case ".png", ".jpg", ".jpeg", ".bmp":
 		return printImage(filePath, printerName)
 	case ".doc", ".docx":
 		return printWord(filePath, printerName)
-	case ".pdf":
-		return printPDF(filePath, printerName)
 	default:
 		return fmt.Errorf("unsupported file type: %s", ext)
 	}
+}
+
+func printPDFViaSumatra(filePath string, printerName string) error {
+	sumatraPath, err := getSumatraPath()
+	if err != nil {
+		log.Printf("event=sumatra_extract_failed error=%q — fallback para PrintTo", err)
+		return printViaStartProcess(filePath, printerName)
+	}
+
+	log.Printf("event=pdf_print_sumatra file=%q printer=%q sumatra=%q", filePath, printerName, sumatraPath)
+
+	cmd := newHiddenCommand(sumatraPath,
+		"-print-to", printerName,
+		"-silent",
+		filePath,
+	)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		log.Printf("event=sumatra_print_failed error=%q stderr=%q", err.Error(), stderr.String())
+		return printViaStartProcess(filePath, printerName)
+	}
+
+	log.Printf("event=pdf_print_success_sumatra file=%q printer=%q", filePath, printerName)
+	return nil
 }
 
 func printImage(filePath string, printerName string) error {
@@ -392,11 +429,25 @@ func handlePrintToFolder(
 		printerName := resolvePrinter(file.PrinterRole)
 		log.Printf("event=resolve_printer role=%s printer=%q file=%q", file.PrinterRole, printerName, file.Name)
 
+		finalPath := downloadedPaths[index]
+
+		if file.PrinterRole == "photo" && strings.HasSuffix(strings.ToLower(finalPath), ".png") {
+			pdfPath := strings.TrimSuffix(finalPath, filepath.Ext(finalPath)) + ".pdf"
+			if err := convertToPDFForDNP(finalPath, pdfPath); err != nil {
+				log.Printf("event=pdf_convert_failed file=%q error=%q — usando PNG como fallback",
+					file.Name, err)
+			} else {
+				os.Remove(finalPath)
+				finalPath = pdfPath
+				log.Printf("event=pdf_converted file=%q output=%q", file.Name, pdfPath)
+			}
+		}
+
 		statuses[index].Status = "moving"
 		emitJobEvent(emit, job, "file", "moving", fmt.Sprintf("Movendo %s para pasta de impressao", file.Name), statuses)
 		onStep("MOVING", index, "")
 
-		destPath, err := moveToHotFolder(downloadedPaths[index], hotFolderPath, job.JobID, file)
+		destPath, err := moveToHotFolder(finalPath, hotFolderPath, job.JobID, file)
 		if err != nil {
 			statuses[index].Status = "failed"
 			statuses[index].Error = err.Error()
@@ -442,6 +493,23 @@ func generatePDF(ctx context.Context, imagePath string, outputPath string) error
 		return fmt.Errorf("copiar imagem como fallback: %w", err)
 	}
 	return nil
+}
+
+func convertToPDFForDNP(imagePath string, outputPath string) error {
+	const w, h = 150.0, 100.0
+
+	pdf := gofpdf.NewCustom(&gofpdf.InitType{
+		UnitStr: "mm",
+		Size:    gofpdf.SizeType{Wd: w, Ht: h},
+	})
+	pdf.SetMargins(0, 0, 0)
+	pdf.SetAutoPageBreak(false, 0)
+	pdf.AddPage()
+
+	pdf.ImageOptions(imagePath, 0, 0, w, h, false,
+		gofpdf.ImageOptions{ImageType: "PNG"}, 0, "")
+
+	return pdf.OutputFileAndClose(outputPath)
 }
 
 func tryImageMagick(ctx context.Context, imagePath string, outputPath string) error {
@@ -524,6 +592,15 @@ func downloadDriveFile(
 }
 
 func requestDownloadURL(ctx context.Context, apiURL string, agentKey string, driveFileID string) (string, error) {
+	if apiURL == "" {
+		return "", fmt.Errorf("apiUrl nao configurado - verifique as configuracoes do agente")
+	}
+
+	parsedBase, err := url.Parse(apiURL)
+	if err != nil || parsedBase.Scheme == "" || parsedBase.Host == "" {
+		return "", fmt.Errorf("apiUrl invalido: %q - verifique as configuracoes do agente", apiURL)
+	}
+
 	endpoint := strings.TrimRight(apiURL, "/") + "/api/print/files/" + url.PathEscape(driveFileID) + "/download-url"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {

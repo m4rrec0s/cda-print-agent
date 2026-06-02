@@ -37,9 +37,19 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 
+	if err := setAutoStart(true); err != nil {
+		log.Printf("event=autostart_set_failed error=%q", err.Error())
+	}
+
 	cfg, err := LoadConfigFromFile()
 	if err != nil {
 		log.Printf("event=config_not_found reason=first_run")
+		return
+	}
+
+	if err := ValidateConfig(cfg); err != nil {
+		log.Printf("event=config_invalid error=%q", err.Error())
+		wailsruntime.EventsEmit(a.ctx, "config:invalid", err.Error())
 		return
 	}
 
@@ -64,6 +74,14 @@ func (a *App) IsConfigured() bool {
 	return ConfigExists()
 }
 
+func (a *App) GetAutoStartEnabled() bool {
+	return getAutoStartEnabled()
+}
+
+func (a *App) SetAutoStartEnabled(enable bool) error {
+	return setAutoStart(enable)
+}
+
 func (a *App) GetAgentConfig() AgentConfig {
 	cfg, err := LoadConfigFromFile()
 	if err != nil {
@@ -78,6 +96,10 @@ func (a *App) SaveAgentConfig(wsURL string, apiURL string, agentKey string, hotF
 		APIURL:        apiURL,
 		AgentKey:      agentKey,
 		HotFolderPath: hotFolderPath,
+	}
+
+	if err := ValidateConfig(&cfg); err != nil {
+		return err
 	}
 
 	if err := SaveConfigFile(cfg); err != nil {

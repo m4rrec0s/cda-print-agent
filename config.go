@@ -2,8 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type AgentConfig struct {
@@ -50,4 +53,27 @@ func SaveConfigFile(cfg AgentConfig) error {
 func ConfigExists() bool {
 	_, err := os.Stat(getConfigPath())
 	return err == nil
+}
+
+func ValidateConfig(cfg *AgentConfig) error {
+	if cfg.WSURL != "" {
+		if !strings.HasPrefix(cfg.WSURL, "ws://") && !strings.HasPrefix(cfg.WSURL, "wss://") {
+			return fmt.Errorf("wsUrl invalido: deve comecar com ws:// ou wss:// (valor atual: %q)", cfg.WSURL)
+		}
+		if _, err := url.Parse(cfg.WSURL); err != nil {
+			return fmt.Errorf("wsUrl invalido: %w", err)
+		}
+	}
+
+	if cfg.APIURL != "" {
+		if _, err := url.Parse(cfg.APIURL); err != nil {
+			return fmt.Errorf("apiUrl invalido: %w", err)
+		}
+		parsed, _ := url.Parse(cfg.APIURL)
+		if parsed.Scheme == "" || parsed.Host == "" {
+			return fmt.Errorf("apiUrl invalido: deve ser uma URL completa (ex: https://api.cestodamore.com.br), valor atual: %q", cfg.APIURL)
+		}
+	}
+
+	return nil
 }

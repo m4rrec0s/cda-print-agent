@@ -10,6 +10,8 @@ export function ClearHotFolder():Promise<void>;
 
 export function GetAgentConfig():Promise<main.AgentConfig>;
 
+export function GetAutoStartEnabled():Promise<boolean>;
+
 export function GetPrinterConfig():Promise<Record<string, any>>;
 
 export function GetPrintersList():Promise<Array<string>>;
@@ -31,6 +33,8 @@ export function QuitApp():Promise<void>;
 export function Reconnect():Promise<void>;
 
 export function SaveAgentConfig(arg1:string,arg2:string,arg3:string,arg4:string):Promise<void>;
+
+export function SetAutoStartEnabled(arg1:boolean):Promise<void>;
 
 export function SetSelectedPrinter(arg1:string,arg2:string):Promise<void>;
 

@@ -18,6 +18,10 @@ export function GetAgentConfig() {
   return window['go']['main']['App']['GetAgentConfig']();
 }
 
+export function GetAutoStartEnabled() {
+  return window['go']['main']['App']['GetAutoStartEnabled']();
+}
+
 export function GetPrinterConfig() {
   return window['go']['main']['App']['GetPrinterConfig']();
 }
@@ -60,6 +64,10 @@ export function Reconnect() {
 
 export function SaveAgentConfig(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['SaveAgentConfig'](arg1, arg2, arg3, arg4);
+}
+
+export function SetAutoStartEnabled(arg1) {
+  return window['go']['main']['App']['SetAutoStartEnabled'](arg1);
 }
 
 export function SetSelectedPrinter(arg1, arg2) {

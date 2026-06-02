@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"log"
+	"os"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -19,6 +20,13 @@ var mainWindowCtx context.Context
 var Version = "dev"
 
 func main() {
+	startHidden := false
+	for _, arg := range os.Args[1:] {
+		if arg == "--hidden" {
+			startHidden = true
+		}
+	}
+
 	app := NewApp()
 
 	err := wails.Run(&options.App{
@@ -29,6 +37,12 @@ func main() {
 			Assets: assets,
 		},
 		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
+		WindowStartState: func() options.WindowStartState {
+			if startHidden {
+				return options.Minimised
+			}
+			return options.Normal
+		}(),
 		OnStartup: func(ctx context.Context) {
 			mainWindowCtx = ctx
 			app.startup(ctx)

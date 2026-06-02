@@ -38,6 +38,13 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      - name: Download SumatraPDF portable
+        shell: pwsh
+        run: |
+          $url = "https://www.sumatrapdfreader.org/dl/rel/3.5.2/SumatraPDF-3.5.2-64.exe"
+          Invoke-WebRequest -Uri $url -OutFile "assets/SumatraPDF.exe"
+          Write-Host "SumatraPDF baixado: $((Get-Item assets/SumatraPDF.exe).Length / 1MB) MB"
+
       - name: Build
         shell: pwsh
         run: |

@@ -29,6 +29,7 @@ Unicode true
 ## !define UNINST_KEY_NAME     "UninstKeyInRegistry"  # Default "${INFO_COMPANYNAME}${INFO_PRODUCTNAME}"
 ####
 ## !define REQUEST_EXECUTION_LEVEL "admin"            # Default "admin"  see also https://nsis.sourceforge.io/Docs/Chapter4.html
+!define REQUEST_EXECUTION_LEVEL "user"
 ####
 ## Include the wails tools
 ####
@@ -72,7 +73,7 @@ ManifestDPIAware true
 
 Name "${INFO_PRODUCTNAME}"
 OutFile "..\..\bin\${INFO_PROJECTNAME}-${ARCH}-installer.exe" # Name of the installer's file.
-InstallDir "$PROGRAMFILES64\${INFO_COMPANYNAME}\${INFO_PRODUCTNAME}" # Default installing folder ($PROGRAMFILES is Program Files folder).
+InstallDir "$APPDATA\CestoDAmore" # Default installing folder — sem precisar de admin.
 ShowInstDetails show # This will always show the installation details.
 
 Function .onInit
@@ -99,6 +100,8 @@ SectionEnd
 
 Section "uninstall"
     !insertmacro wails.setShellContext
+
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "CestoDAmore"
 
     RMDir /r "$AppData\${PRODUCT_EXECUTABLE}" # Remove the WebView2 DataPath
 

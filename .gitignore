@@ -5,3 +5,4 @@ frontend/dist
 defaults.env
 /build/bin/*
 .serena/
+assets/SumatraPDF.exe
