@@ -10,6 +10,10 @@ export function CheckUpdate() {
   return window['go']['main']['App']['CheckUpdate']();
 }
 
+export function ClearHotFolder() {
+  return window['go']['main']['App']['ClearHotFolder']();
+}
+
 export function GetAgentConfig() {
   return window['go']['main']['App']['GetAgentConfig']();
 }
@@ -34,8 +38,16 @@ export function IsConfigured() {
   return window['go']['main']['App']['IsConfigured']();
 }
 
+export function ListSavedArts() {
+  return window['go']['main']['App']['ListSavedArts']();
+}
+
 export function MinimizeToTray() {
   return window['go']['main']['App']['MinimizeToTray']();
+}
+
+export function OpenHotFolder() {
+  return window['go']['main']['App']['OpenHotFolder']();
 }
 
 export function QuitApp() {

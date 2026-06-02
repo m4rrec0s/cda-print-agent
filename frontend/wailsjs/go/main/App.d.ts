@@ -4,7 +4,9 @@ import {main} from '../models';
 
 export function ApplyUpdateAndRestart(arg1:string):Promise<void>;
 
-export function CheckUpdate():Promise<main.VersionInfo | null>;
+export function CheckUpdate():Promise<main.VersionInfo>;
+
+export function ClearHotFolder():Promise<void>;
 
 export function GetAgentConfig():Promise<main.AgentConfig>;
 
@@ -18,7 +20,11 @@ export function GetStatus():Promise<string>;
 
 export function IsConfigured():Promise<boolean>;
 
+export function ListSavedArts():Promise<Array<main.SavedArtInfo>>;
+
 export function MinimizeToTray():Promise<void>;
+
+export function OpenHotFolder():Promise<void>;
 
 export function QuitApp():Promise<void>;
 

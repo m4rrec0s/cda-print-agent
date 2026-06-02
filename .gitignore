@@ -4,3 +4,4 @@ frontend/dist
 .env
 defaults.env
 /build/bin/*
+.serena/

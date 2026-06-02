@@ -18,7 +18,26 @@ export namespace main {
 	        this.hotFolderPath = source["hotFolderPath"];
 	    }
 	}
-
+	export class SavedArtInfo {
+	    name: string;
+	    path: string;
+	    sizeBytes: number;
+	    modifiedAt: string;
+	    isDir: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new SavedArtInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.path = source["path"];
+	        this.sizeBytes = source["sizeBytes"];
+	        this.modifiedAt = source["modifiedAt"];
+	        this.isDir = source["isDir"];
+	    }
+	}
 	export class VersionInfo {
 	    version: string;
 	    downloadUrl: string;
@@ -37,3 +56,4 @@ export namespace main {
 	}
 
 }
+

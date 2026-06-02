@@ -37,195 +37,64 @@ export function SetupWizard({ onComplete, onCancel }: Props) {
     }
   };
 
-  const inputStyle: React.CSSProperties = {
-    background: "#0d0d0d",
-    border: "1px solid #1a1a1a",
-    borderRadius: 6,
-    padding: "8px 10px",
-    color: "#d4d4d4",
-    fontFamily: '"JetBrains Mono", monospace',
-    fontSize: 12,
-    outline: "none",
-    width: "100%",
-  };
-
   return (
-    <main
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        height: "100vh",
-        color: "#d4d4d4",
-        fontFamily:
-          '"Geist", -apple-system, "Segoe UI Variable", system-ui, sans-serif',
-        background: "#0d0d0d",
-      }}
-    >
-      <header
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "12px 14px",
-          borderBottom: "1px solid #1a1a1a",
-          minHeight: 42,
-        }}
-      >
-        <span
-          style={{
-            fontSize: 9,
-            letterSpacing: "0.16em",
-            fontWeight: 600,
-            color: "#777",
-          }}
-        >
-          CONFIGURAÇÃO
-        </span>
+    <main className="setup-shell">
+      <header className="setup-topbar">
+        <span className="brand">CONFIGURAÇÃO</span>
       </header>
 
-      <form
-        onSubmit={handleSubmit}
-        style={{
-          flex: 1,
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-        }}
-      >
-        <div style={{ textAlign: "center", padding: "20px 20px 12px" }}>
-          <h1
-            style={{
-              margin: 0,
-              fontSize: 15,
-              fontWeight: 700,
-              color: "#e8e8e8",
-              letterSpacing: "0.02em",
-            }}
-          >
-            Cesto d'Amore
-          </h1>
-          <p
-            style={{
-              margin: "4px 0 0",
-              color: "#555",
-              fontSize: 11,
-              letterSpacing: "0.06em",
-            }}
-          >
-            CONFIGURAÇÃO DO AGENTE
-          </p>
-        </div>
-
-        <div style={{ flex: 1, overflowY: "auto", padding: "0 20px 12px" }}>
-          <div
-            className="printer-row"
-            style={{
-              flexDirection: "column",
-              alignItems: "stretch",
-              gap: 6,
-              padding: "12px 14px",
-            }}
-          >
-            <label
-              className="printer-role"
-              style={{ fontSize: 10, marginBottom: 0 }}
-            >
-              SERVIDOR WEBSOCKET
-            </label>
-            <input
-              style={inputStyle}
-              value={wsUrl}
-              onChange={(e) => setWsUrl(e.target.value)}
-              placeholder="wss://api.cestodamore.com.br/ws/print-agent"
-            />
+      <form onSubmit={handleSubmit} className="setup-form">
+        <section className="settings-panel">
+          <div className="settings-header">
+            <h1>Cesto d'Amore</h1>
+            <p>CONFIGURAÇÕES DO AGENTE</p>
           </div>
 
-          <div
-            className="printer-row"
-            style={{
-              flexDirection: "column",
-              alignItems: "stretch",
-              gap: 6,
-              padding: "12px 14px",
-            }}
-          >
-            <label
-              className="printer-role"
-              style={{ fontSize: 10, marginBottom: 0 }}
-            >
-              URL DA API
-            </label>
-            <input
-              style={inputStyle}
-              value={apiUrl}
-              onChange={(e) => setApiUrl(e.target.value)}
-              placeholder="https://api.cestodamore.com.br"
-            />
-          </div>
+          <div className="settings-fields">
+            <div className="settings-field">
+              <label>SERVIDOR WEBSOCKET</label>
+              <input
+                value={wsUrl}
+                onChange={(e) => setWsUrl(e.target.value)}
+                placeholder="wss://api.cestodamore.com.br/ws/print-agent"
+              />
+            </div>
 
-          <div
-            className="printer-row"
-            style={{
-              flexDirection: "column",
-              alignItems: "stretch",
-              gap: 6,
-              padding: "12px 14px",
-            }}
-          >
-            <label
-              className="printer-role"
-              style={{ fontSize: 10, marginBottom: 0 }}
-            >
-              CHAVE DO AGENTE
-            </label>
-            <input
-              style={inputStyle}
-              type="password"
-              value={agentKey}
-              onChange={(e) => setAgentKey(e.target.value)}
-              placeholder="Opcional"
-            />
-          </div>
+            <div className="settings-field">
+              <label>URL DA API</label>
+              <input
+                value={apiUrl}
+                onChange={(e) => setApiUrl(e.target.value)}
+                placeholder="https://api.cestodamore.com.br"
+              />
+            </div>
 
-          <div
-            className="printer-row"
-            style={{
-              flexDirection: "column",
-              alignItems: "stretch",
-              gap: 6,
-              padding: "12px 14px",
-            }}
-          >
-            <label
-              className="printer-role"
-              style={{ fontSize: 10, marginBottom: 0 }}
-            >
-              PASTA DE IMPRESSÃO
-            </label>
-            <input
-              style={inputStyle}
-              value={hotFolderPath}
-              onChange={(e) => setHotFolderPath(e.target.value)}
-              placeholder="C:\PrintHotFolder"
-            />
+            <div className="settings-field">
+              <label>CHAVE DO AGENTE</label>
+              <input
+                type="password"
+                value={agentKey}
+                onChange={(e) => setAgentKey(e.target.value)}
+                placeholder="Opcional"
+              />
+            </div>
+
+            <div className="settings-field">
+              <label>PASTA DE IMPRESSÃO</label>
+              <input
+                value={hotFolderPath}
+                onChange={(e) => setHotFolderPath(e.target.value)}
+                placeholder="C:\PrintHotFolder"
+              />
+            </div>
           </div>
 
           {error && (
-            <div
-              className="printer-row"
-              style={{
-                background: "#1a0d0d",
-                border: "1px solid #2a1515",
-                color: "#ef4444",
-                fontSize: 11,
-                justifyContent: "center",
-                marginTop: 8,
-              }}
-            >
+            <div className="settings-error">
               {error}
             </div>
           )}
-        </div>
+        </section>
 
         <footer
           className="actions"

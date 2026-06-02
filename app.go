@@ -3,10 +3,15 @@ package main
 import (
 	"context"
 	"log"
+	"os"
+	"os/exec"
+	"path/filepath"
+	stdruntime "runtime"
+	"sort"
 	"sync"
 	"time"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 type App struct {
@@ -15,6 +20,14 @@ type App struct {
 	allowQuit    bool
 	updateCancel context.CancelFunc
 	mu           sync.RWMutex
+}
+
+type SavedArtInfo struct {
+	Name       string `json:"name"`
+	Path       string `json:"path"`
+	SizeBytes  int64  `json:"sizeBytes"`
+	ModifiedAt string `json:"modifiedAt"`
+	IsDir      bool   `json:"isDir"`
 }
 
 func NewApp() *App {
@@ -76,10 +89,13 @@ func (a *App) SaveAgentConfig(wsURL string, apiURL string, agentKey string, hotF
 		a.tray = NewTrayManager(wsManager.StatusUpdates())
 		a.tray.Start(a)
 	}
+	wailsruntime.EventsEmit(a.ctx, "ws:status", "connecting")
 	if err := wsManager.Connect(); err != nil {
 		log.Printf("event=websocket_connect_after_config_failed error=%q", err.Error())
+		wailsruntime.EventsEmit(a.ctx, "ws:status", "disconnected")
 		return err
 	}
+	wailsruntime.EventsEmit(a.ctx, "ws:status", "connected")
 	wsManager.StartListening(a.ctx)
 	a.startUpdateTicker(a.ctx, cfg.APIURL, cfg.AgentKey)
 	return nil
@@ -88,6 +104,9 @@ func (a *App) SaveAgentConfig(wsURL string, apiURL string, agentKey string, hotF
 // ── Existing bindings (preservados) ──────────────────
 
 func (a *App) GetStatus() string {
+	if wsManager != nil && wsManager.IsConnecting() {
+		return "connecting"
+	}
 	if wsManager != nil && wsManager.IsConnected() {
 		return "connected"
 	}
@@ -112,6 +131,94 @@ func (a *App) GetPrinterConfig() map[string]*string {
 		"photo":  cfg.Photo,
 		"letter": cfg.Letter,
 	}
+}
+
+func (a *App) ListSavedArts() ([]SavedArtInfo, error) {
+	cfg, err := LoadConfigFromFile()
+	if err != nil || cfg.HotFolderPath == "" {
+		return []SavedArtInfo{}, nil
+	}
+
+	if err := os.MkdirAll(cfg.HotFolderPath, 0755); err != nil {
+		return nil, err
+	}
+
+	entries, err := os.ReadDir(cfg.HotFolderPath)
+	if err != nil {
+		return nil, err
+	}
+
+	arts := make([]SavedArtInfo, 0, len(entries))
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			log.Printf("event=saved_art_stat_failed name=%q error=%q", entry.Name(), err.Error())
+			continue
+		}
+
+		arts = append(arts, SavedArtInfo{
+			Name:       entry.Name(),
+			Path:       filepath.Join(cfg.HotFolderPath, entry.Name()),
+			SizeBytes:  info.Size(),
+			ModifiedAt: info.ModTime().Format(time.RFC3339),
+			IsDir:      entry.IsDir(),
+		})
+	}
+
+	sort.Slice(arts, func(i, j int) bool {
+		return arts[i].ModifiedAt > arts[j].ModifiedAt
+	})
+
+	return arts, nil
+}
+
+func (a *App) OpenHotFolder() error {
+	cfg, err := LoadConfigFromFile()
+	if err != nil || cfg.HotFolderPath == "" {
+		return nil
+	}
+
+	if err := os.MkdirAll(cfg.HotFolderPath, 0755); err != nil {
+		return err
+	}
+
+	var cmd *exec.Cmd
+	switch stdruntime.GOOS {
+	case "windows":
+		cmd = newHiddenCommand("explorer", cfg.HotFolderPath)
+	case "darwin":
+		cmd = exec.Command("open", cfg.HotFolderPath)
+	default:
+		cmd = exec.Command("xdg-open", cfg.HotFolderPath)
+	}
+
+	return cmd.Start()
+}
+
+func (a *App) ClearHotFolder() error {
+	cfg, err := LoadConfigFromFile()
+	if err != nil || cfg.HotFolderPath == "" {
+		return nil
+	}
+
+	if err := os.MkdirAll(cfg.HotFolderPath, 0755); err != nil {
+		return err
+	}
+
+	entries, err := os.ReadDir(cfg.HotFolderPath)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		path := filepath.Join(cfg.HotFolderPath, entry.Name())
+		if err := os.RemoveAll(path); err != nil {
+			return err
+		}
+	}
+
+	wailsruntime.EventsEmit(a.ctx, "arts:changed")
+	return nil
 }
 
 func (a *App) SetSelectedPrinter(role string, printerName string) {
@@ -150,10 +257,13 @@ func (a *App) Reconnect() error {
 	}
 
 	wsManager.Close()
+	wailsruntime.EventsEmit(a.ctx, "ws:status", "connecting")
 	if err := wsManager.Connect(); err != nil {
 		log.Printf("event=websocket_reconnect_failed error=%q", err.Error())
+		wailsruntime.EventsEmit(a.ctx, "ws:status", "disconnected")
 		return err
 	}
+	wailsruntime.EventsEmit(a.ctx, "ws:status", "connected")
 	return nil
 }
 
@@ -210,7 +320,7 @@ func (a *App) startUpdateTicker(ctx context.Context, apiURL string, agentKey str
 					continue
 				}
 				if info != nil {
-					runtime.EventsEmit(a.ctx, "app:update", info)
+					wailsruntime.EventsEmit(a.ctx, "app:update", info)
 				}
 			}
 		}
@@ -221,17 +331,17 @@ func (a *App) MinimizeToTray() {
 	if a.ctx == nil {
 		return
 	}
-	runtime.WindowHide(a.ctx)
+	wailsruntime.WindowHide(a.ctx)
 }
 
 func (a *App) ShowWindow() {
 	if a.ctx == nil {
 		return
 	}
-	runtime.WindowShow(a.ctx)
-	runtime.WindowUnminimise(a.ctx)
-	runtime.WindowSetAlwaysOnTop(a.ctx, true)
-	runtime.WindowSetAlwaysOnTop(a.ctx, false)
+	wailsruntime.WindowShow(a.ctx)
+	wailsruntime.WindowUnminimise(a.ctx)
+	wailsruntime.WindowSetAlwaysOnTop(a.ctx, true)
+	wailsruntime.WindowSetAlwaysOnTop(a.ctx, false)
 }
 
 func (a *App) QuitApp() {
@@ -249,7 +359,7 @@ func (a *App) QuitApp() {
 		a.tray.Stop()
 	}
 	if a.ctx != nil {
-		runtime.Quit(a.ctx)
+		wailsruntime.Quit(a.ctx)
 	}
 }
 

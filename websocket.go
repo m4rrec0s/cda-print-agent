@@ -44,6 +44,7 @@ type WebSocketManager struct {
 	hotFolderPath   string
 	printerConfig   PrinterConfigMap
 	connected       bool
+	connecting      bool
 	done            chan struct{}
 	stopOnce        sync.Once
 	writeMu         sync.Mutex
@@ -95,6 +96,7 @@ func (wm *WebSocketManager) StatusUpdates() <-chan string {
 }
 
 func (wm *WebSocketManager) Connect() error {
+	wm.setConnecting(true)
 	headers := http.Header{}
 	if wm.agentKey != "" {
 		headers.Set("X-Agent-Key", wm.agentKey)
@@ -110,6 +112,7 @@ func (wm *WebSocketManager) Connect() error {
 	wm.mu.Lock()
 	wm.conn = conn
 	wm.connected = true
+	wm.connecting = false
 	wm.mu.Unlock()
 	wm.emitStatus("connected")
 
@@ -145,11 +148,18 @@ func (wm *WebSocketManager) IsConnected() bool {
 	return wm.connected && wm.conn != nil
 }
 
+func (wm *WebSocketManager) IsConnecting() bool {
+	wm.mu.RLock()
+	defer wm.mu.RUnlock()
+	return wm.connecting
+}
+
 func (wm *WebSocketManager) Close() error {
 	wm.mu.Lock()
 	conn := wm.conn
 	wm.conn = nil
 	wm.connected = false
+	wm.connecting = false
 	wm.mu.Unlock()
 	wm.emitStatus("disconnected")
 
@@ -216,8 +226,10 @@ func (wm *WebSocketManager) readLoop(ctx context.Context) {
 
 		if !wm.IsConnected() {
 			time.Sleep(5 * time.Second)
+			runtime.EventsEmit(ctx, "ws:status", "connecting")
 			if err := wm.Connect(); err != nil {
 				log.Printf("event=websocket_reconnect_failed error=%q", err.Error())
+				runtime.EventsEmit(ctx, "ws:status", "disconnected")
 				continue
 			}
 			runtime.EventsEmit(ctx, "ws:status", "connected")
@@ -478,11 +490,21 @@ func (wm *WebSocketManager) startPingLoop(ctx context.Context) {
 func (wm *WebSocketManager) setConnected(connected bool) {
 	wm.mu.Lock()
 	wm.connected = connected
+	wm.connecting = false
 	wm.mu.Unlock()
 	if connected {
 		wm.emitStatus("connected")
 	} else {
 		wm.emitStatus("disconnected")
+	}
+}
+
+func (wm *WebSocketManager) setConnecting(connecting bool) {
+	wm.mu.Lock()
+	wm.connecting = connecting
+	wm.mu.Unlock()
+	if connecting {
+		wm.emitStatus("connecting")
 	}
 }
 
