@@ -45,18 +45,13 @@ export function SetupWizard({ onComplete, onCancel }: Props) {
 
       <form onSubmit={handleSubmit} className="setup-form">
         <section className="settings-panel">
-          <div className="settings-header">
-            <h1>Cesto d'Amore</h1>
-            <p>CONFIGURAÇÕES DO AGENTE</p>
-          </div>
-
           <div className="settings-fields">
             <div className="settings-field">
               <label>SERVIDOR WEBSOCKET</label>
               <input
                 value={wsUrl}
                 onChange={(e) => setWsUrl(e.target.value)}
-                placeholder="wss://api.cestodamore.com.br/ws/print-agent"
+                placeholder="wss://..."
               />
             </div>
 
@@ -65,7 +60,7 @@ export function SetupWizard({ onComplete, onCancel }: Props) {
               <input
                 value={apiUrl}
                 onChange={(e) => setApiUrl(e.target.value)}
-                placeholder="https://api.cestodamore.com.br"
+                placeholder="https://..."
               />
             </div>
 
@@ -84,24 +79,15 @@ export function SetupWizard({ onComplete, onCancel }: Props) {
               <input
                 value={hotFolderPath}
                 onChange={(e) => setHotFolderPath(e.target.value)}
-                placeholder="C:\PrintHotFolder"
+                placeholder="Caminho"
               />
             </div>
           </div>
 
-          {error && (
-            <div className="settings-error">
-              {error}
-            </div>
-          )}
+          {error && <div className="settings-error">{error}</div>}
         </section>
 
-        <footer
-          className="actions"
-          style={{
-            borderTop: "1px solid #1a1a1a",
-          }}
-        >
+        <footer className="actions">
           {onCancel && (
             <button type="button" className="btn-ghost" onClick={onCancel}>
               CANCELAR

@@ -78,6 +78,10 @@ func (a *App) GetAutoStartEnabled() bool {
 	return getAutoStartEnabled()
 }
 
+func (a *App) GetVersion() string {
+	return Version
+}
+
 func (a *App) SetAutoStartEnabled(enable bool) error {
 	return setAutoStart(enable)
 }
@@ -207,7 +211,7 @@ func (a *App) OpenHotFolder() error {
 	var cmd *exec.Cmd
 	switch stdruntime.GOOS {
 	case "windows":
-		cmd = newHiddenCommand("explorer", cfg.HotFolderPath)
+		cmd = exec.Command("explorer", cfg.HotFolderPath)
 	case "darwin":
 		cmd = exec.Command("open", cfg.HotFolderPath)
 	default:

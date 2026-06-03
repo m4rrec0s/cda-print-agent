@@ -20,6 +20,8 @@ export function GetSelectedPrinter():Promise<string>;
 
 export function GetStatus():Promise<string>;
 
+export function GetVersion():Promise<string>;
+
 export function IsConfigured():Promise<boolean>;
 
 export function ListSavedArts():Promise<Array<main.SavedArtInfo>>;

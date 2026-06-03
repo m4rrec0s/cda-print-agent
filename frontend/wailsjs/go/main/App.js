@@ -38,6 +38,10 @@ export function GetStatus() {
   return window['go']['main']['App']['GetStatus']();
 }
 
+export function GetVersion() {
+  return window['go']['main']['App']['GetVersion']();
+}
+
 export function IsConfigured() {
   return window['go']['main']['App']['IsConfigured']();
 }

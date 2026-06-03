@@ -439,19 +439,9 @@ export function AgentPanel({ onReconfigure }: AgentPanelProps) {
           {onReconfigure && (
             <button
               type="button"
+              className="icon-btn"
               onClick={onReconfigure}
-              style={{
-                background: "none",
-                border: 0,
-                cursor: "pointer",
-                color: "#3a3a3a",
-                padding: 0,
-                display: "flex",
-                alignItems: "center",
-                height: 20,
-                width: 20,
-              }}
-              title="Reconfigurar"
+              title="Configurações"
             >
               <IconSettings size={14} />
             </button>
@@ -488,7 +478,7 @@ export function AgentPanel({ onReconfigure }: AgentPanelProps) {
                 <div>
                   <div className="section-label printer-collapse-label">
                     IMPRESSORAS{" "}
-                    <span style={{ color: "green" }}>({printerSummary})</span>
+                    <span style={{ color: "var(--green)" }}>({printerSummary})</span>
                   </div>
 
                   <div

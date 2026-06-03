@@ -20,6 +20,13 @@ var mainWindowCtx context.Context
 var Version = "dev"
 
 func main() {
+	isFirst, lockHandle := AcquireSingleInstanceLock()
+	if !isFirst {
+		FocusExistingInstance()
+		return
+	}
+	defer ReleaseSingleInstanceLock(lockHandle)
+
 	startHidden := false
 	for _, arg := range os.Args[1:] {
 		if arg == "--hidden" {

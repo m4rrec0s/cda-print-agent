@@ -1,47 +1,105 @@
 import { useEffect, useState } from "react";
-import { IsConfigured } from "../wailsjs/go/main/App";
+import { IsConfigured, GetVersion } from "../wailsjs/go/main/App";
 import "./App.css";
 import { SetupWizard } from "./SetupWizard";
 import { AgentPanel } from "./AgentPanel";
+import { SettingsPage } from "./SettingsPage";
+import { ThemePage } from "./ThemePage";
+import { AboutPage } from "./AboutPage";
+import { ThemeProvider } from "./ThemeContext";
+
+type View =
+  | "loading"
+  | "wizard"
+  | "panel"
+  | "settings"
+  | "settings-wizard"
+  | "settings-theme"
+  | "settings-about";
 
 export default function App() {
-  const [configured, setConfigured] = useState<boolean | null>(null);
-  const [reconfiguring, setReconfiguring] = useState(false);
+  const [view, setView] = useState<View>("loading");
+  const [version, setVersion] = useState("dev");
 
   useEffect(() => {
-    IsConfigured().then(setConfigured);
+    Promise.all([IsConfigured(), GetVersion()]).then(([ok, ver]) => {
+      setVersion(ver || "dev");
+      setView(ok ? "panel" : "wizard");
+    });
   }, []);
 
-  if (configured === null) {
+  if (view === "loading") {
     return (
-      <main
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          height: "100vh",
-          background: "#171717",
-          color: "#777",
-          fontSize: "13px",
-          fontFamily: "Inter, sans-serif",
-        }}
-      >
-        Carregando...
-      </main>
+      <ThemeProvider>
+        <main
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            height: "100vh",
+            background: "var(--bg-base)",
+            color: "var(--text-muted)",
+            fontSize: "13px",
+            fontFamily: "Geist, -apple-system, system-ui, sans-serif",
+          }}
+        >
+          Carregando...
+        </main>
+      </ThemeProvider>
     );
   }
 
-  if (!configured || reconfiguring) {
+  if (view === "wizard") {
     return (
-      <SetupWizard
-        onComplete={() => {
-          setConfigured(true);
-          setReconfiguring(false);
-        }}
-        onCancel={configured ? () => setReconfiguring(false) : undefined}
-      />
+      <ThemeProvider>
+        <SetupWizard onComplete={() => setView("panel")} />
+      </ThemeProvider>
     );
   }
 
-  return <AgentPanel onReconfigure={() => setReconfiguring(true)} />;
+  if (view === "settings-wizard") {
+    return (
+      <ThemeProvider>
+        <SetupWizard
+          onComplete={() => setView("panel")}
+          onCancel={() => setView("settings")}
+        />
+      </ThemeProvider>
+    );
+  }
+
+  if (view === "settings-theme") {
+    return (
+      <ThemeProvider>
+        <ThemePage onBack={() => setView("settings")} />
+      </ThemeProvider>
+    );
+  }
+
+  if (view === "settings-about") {
+    return (
+      <ThemeProvider>
+        <AboutPage onBack={() => setView("settings")} version={version} />
+      </ThemeProvider>
+    );
+  }
+
+  if (view === "settings") {
+    return (
+      <ThemeProvider>
+        <SettingsPage
+          onBack={() => setView("panel")}
+          onOpenBasicConfig={() => setView("settings-wizard")}
+          onOpenTheme={() => setView("settings-theme")}
+          onOpenAbout={() => setView("settings-about")}
+        />
+      </ThemeProvider>
+    );
+  }
+
+  return (
+    <ThemeProvider>
+      <AgentPanel onReconfigure={() => setView("settings")} />
+    </ThemeProvider>
+  );
 }
