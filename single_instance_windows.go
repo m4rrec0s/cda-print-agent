@@ -12,28 +12,25 @@ import (
 const mutexName = "CestoDAmore_PrintAgent_SingleInstance"
 
 var (
-	modkernel32      = windows.NewLazyDLL("kernel32.dll")
-	procCreateMutex  = modkernel32.NewProc("CreateMutexW")
-	procGetLastError = modkernel32.NewProc("GetLastError")
+	modkernel32     = windows.NewLazyDLL("kernel32.dll")
+	procCreateMutex = modkernel32.NewProc("CreateMutexW")
 )
 
-const errorAlreadyExists = uintptr(183)
+const errorAlreadyExists = 183
 
 func AcquireSingleInstanceLock() (bool, uintptr) {
 	name, _ := syscall.UTF16PtrFromString(mutexName)
-	handle, _, _ := procCreateMutex.Call(
+	handle, _, err := procCreateMutex.Call(
 		0,
 		1, // bInitialOwner = true
 		uintptr(unsafe.Pointer(name)),
 	)
 
-	lastErr, _, _ := procGetLastError.Call()
-
 	if handle == 0 {
 		return false, 0
 	}
 
-	if lastErr == errorAlreadyExists {
+	if err == syscall.Errno(errorAlreadyExists) {
 		windows.CloseHandle(windows.Handle(handle))
 		return false, 0
 	}

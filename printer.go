@@ -506,7 +506,7 @@ func generatePDF(ctx context.Context, imagePath string, outputPath string) error
 }
 
 func convertToPDFForDNP(imagePath string, outputPath string) error {
-	const w, h = 150.0, 100.0
+	const w, h = 100.0, 150.0
 
 	pdf := gofpdf.NewCustom(&gofpdf.InitType{
 		UnitStr: "mm",
