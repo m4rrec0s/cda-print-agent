@@ -308,8 +308,12 @@ func printImage(filePath string, printerName string) error {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		log.Printf("event=mspaint_failed error=%q fallback=PrintTo", err.Error())
-		return printViaStartProcess(filePath, printerName)
+		log.Printf("event=mspaint_failed error=%q fallback=sumatra", err.Error())
+		if sumatraErr := printPDFViaSumatra(filePath, printerName); sumatraErr != nil {
+			log.Printf("event=sumatra_image_failed error=%q fallback=PrintTo", sumatraErr.Error())
+			return printViaStartProcess(filePath, printerName)
+		}
+		return nil
 	}
 
 	log.Printf("event=print_sent_via_mspaint file=%q printer=%q", filePath, printerName)
@@ -431,16 +435,22 @@ func handlePrintToFolder(
 
 		finalPath := downloadedPaths[index]
 
-		if file.PrinterRole == "photo" && strings.HasSuffix(strings.ToLower(finalPath), ".png") {
+		if file.PrinterRole == "photo" && !strings.HasSuffix(strings.ToLower(finalPath), ".pdf") {
 			pdfPath := strings.TrimSuffix(finalPath, filepath.Ext(finalPath)) + ".pdf"
 			if err := convertToPDFForDNP(finalPath, pdfPath); err != nil {
-				log.Printf("event=pdf_convert_failed file=%q error=%q — usando PNG como fallback",
-					file.Name, err)
-			} else {
-				os.Remove(finalPath)
-				finalPath = pdfPath
-				log.Printf("event=pdf_converted file=%q output=%q", file.Name, pdfPath)
+				log.Printf("event=pdf_convert_gofpdf_failed file=%q error=%q — tentando ImageMagick", file.Name, err)
+				if err2 := tryImageMagick(ctx, finalPath, pdfPath); err2 != nil {
+					statuses[index].Status = "failed"
+					statuses[index].Error = fmt.Sprintf("falha ao converter para PDF: %s", err.Error())
+					emitJobEvent(emit, job, "failed", "failed", fmt.Sprintf("Falha ao converter %s para PDF", file.Name), statuses)
+					onStep("FAILED", index, err.Error())
+					return fmt.Errorf("conversao PDF obrigatoria falhou para %s: %w", file.Name, err)
+				}
 			}
+			os.Remove(finalPath)
+			finalPath = pdfPath
+			file.Name = strings.TrimSuffix(file.Name, filepath.Ext(file.Name)) + ".pdf"
+			log.Printf("event=pdf_converted file=%q output=%q", file.Name, pdfPath)
 		}
 
 		statuses[index].Status = "moving"
@@ -506,8 +516,19 @@ func convertToPDFForDNP(imagePath string, outputPath string) error {
 	pdf.SetAutoPageBreak(false, 0)
 	pdf.AddPage()
 
+	ext := strings.ToLower(filepath.Ext(imagePath))
+	imageType := "PNG"
+	switch ext {
+	case ".jpg", ".jpeg":
+		imageType = "JPEG"
+	case ".png":
+		imageType = "PNG"
+	case ".gif":
+		imageType = "GIF"
+	}
+
 	pdf.ImageOptions(imagePath, 0, 0, w, h, false,
-		gofpdf.ImageOptions{ImageType: "PNG"}, 0, "")
+		gofpdf.ImageOptions{ImageType: imageType}, 0, "")
 
 	return pdf.OutputFileAndClose(outputPath)
 }
