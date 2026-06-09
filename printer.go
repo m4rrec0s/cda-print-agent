@@ -5,6 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"log"
 	"net/http"
@@ -506,7 +510,24 @@ func generatePDF(ctx context.Context, imagePath string, outputPath string) error
 }
 
 func convertToPDFForDNP(imagePath string, outputPath string) error {
-	const w, h = 100.0, 150.0
+	// Detectar orientação da imagem
+	f, err := os.Open(imagePath)
+	if err != nil {
+		return fmt.Errorf("abrir imagem para detectar dimensoes: %w", err)
+	}
+	cfg, _, err := image.DecodeConfig(f)
+	f.Close()
+	if err != nil {
+		return fmt.Errorf("decodificar config da imagem: %w", err)
+	}
+
+	// PR 4x6: 100x150mm. Orientação baseada no aspect ratio da imagem.
+	var w, h float64
+	if cfg.Width >= cfg.Height {
+		w, h = 150.0, 100.0 // Landscape
+	} else {
+		w, h = 100.0, 150.0 // Portrait
+	}
 
 	pdf := gofpdf.NewCustom(&gofpdf.InitType{
 		UnitStr: "mm",
