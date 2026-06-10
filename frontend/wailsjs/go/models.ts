@@ -5,6 +5,7 @@ export namespace main {
 	    apiUrl: string;
 	    agentKey: string;
 	    hotFolderPath: string;
+	    deviceName: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new AgentConfig(source);
@@ -16,6 +17,7 @@ export namespace main {
 	        this.apiUrl = source["apiUrl"];
 	        this.agentKey = source["agentKey"];
 	        this.hotFolderPath = source["hotFolderPath"];
+	        this.deviceName = source["deviceName"];
 	    }
 	}
 	export class SavedArtInfo {

@@ -94,12 +94,21 @@ func (a *App) GetAgentConfig() AgentConfig {
 	return *cfg
 }
 
-func (a *App) SaveAgentConfig(wsURL string, apiURL string, agentKey string, hotFolderPath string) error {
+func (a *App) SaveAgentConfig(wsURL string, apiURL string, agentKey string, hotFolderPath string, deviceName string) error {
+	// Load existing config to preserve DeviceID
+	existing, _ := LoadConfigFromFile()
 	cfg := AgentConfig{
 		WSURL:         wsURL,
 		APIURL:        apiURL,
 		AgentKey:      agentKey,
 		HotFolderPath: hotFolderPath,
+		DeviceName:    deviceName,
+	}
+	if existing != nil {
+		cfg.DeviceID = existing.DeviceID
+	}
+	if cfg.DeviceName == "" && existing != nil {
+		cfg.DeviceName = existing.DeviceName
 	}
 
 	if err := ValidateConfig(&cfg); err != nil {

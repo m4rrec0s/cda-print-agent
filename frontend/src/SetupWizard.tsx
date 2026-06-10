@@ -11,6 +11,7 @@ export function SetupWizard({ onComplete, onCancel }: Props) {
   const [apiUrl, setApiUrl] = useState("");
   const [agentKey, setAgentKey] = useState("");
   const [hotFolderPath, setHotFolderPath] = useState("");
+  const [deviceName, setDeviceName] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -20,6 +21,7 @@ export function SetupWizard({ onComplete, onCancel }: Props) {
       if (cfg.apiUrl) setApiUrl(cfg.apiUrl);
       if (cfg.agentKey) setAgentKey(cfg.agentKey);
       if (cfg.hotFolderPath) setHotFolderPath(cfg.hotFolderPath);
+      if (cfg.deviceName) setDeviceName(cfg.deviceName);
     });
   }, []);
 
@@ -28,7 +30,7 @@ export function SetupWizard({ onComplete, onCancel }: Props) {
     setError("");
     setSaving(true);
     try {
-      await SaveAgentConfig(wsUrl, apiUrl, agentKey, hotFolderPath);
+      await SaveAgentConfig(wsUrl, apiUrl, agentKey, hotFolderPath, deviceName);
       onComplete();
     } catch (err) {
       setError(String(err));
@@ -46,6 +48,15 @@ export function SetupWizard({ onComplete, onCancel }: Props) {
       <form onSubmit={handleSubmit} className="setup-form">
         <section className="settings-panel">
           <div className="settings-fields">
+            <div className="settings-field">
+              <label>NOME DO DISPOSITIVO</label>
+              <input
+                value={deviceName}
+                onChange={(e) => setDeviceName(e.target.value)}
+                placeholder="Ex: PC da Loja"
+              />
+            </div>
+
             <div className="settings-field">
               <label>SERVIDOR WEBSOCKET</label>
               <input

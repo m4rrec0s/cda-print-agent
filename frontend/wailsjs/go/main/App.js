@@ -66,8 +66,8 @@ export function Reconnect() {
   return window['go']['main']['App']['Reconnect']();
 }
 
-export function SaveAgentConfig(arg1, arg2, arg3, arg4) {
-  return window['go']['main']['App']['SaveAgentConfig'](arg1, arg2, arg3, arg4);
+export function SaveAgentConfig(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['SaveAgentConfig'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function SetAutoStartEnabled(arg1) {
