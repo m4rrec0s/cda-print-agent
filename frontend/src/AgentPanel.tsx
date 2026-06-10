@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { useAgentLogs } from "./hooks/useAgentLogs";
+import { ErrorLog } from "./components/ErrorLog";
+import { useToast, ToastContainer } from "./components/Toast";
 import {
   ApplyUpdateAndRestart,
   ClearHotFolder,
@@ -225,21 +228,20 @@ export function AgentPanel({ onReconfigure }: AgentPanelProps) {
   const [printerConfigLoading, setPrinterConfigLoading] = useState(true);
   const [savedArts, setSavedArts] = useState<SavedArtInfo[]>([]);
   const [artsLoading, setArtsLoading] = useState(true);
-  const [artsError, setArtsError] = useState("");
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [updateBannerDismissed, setUpdateBannerDismissed] = useState(false);
   const [updating, setUpdating] = useState(false);
+  const { logs, addLog, clearLogs } = useAgentLogs();
+  const { toasts, showToast } = useToast();
 
   const refreshSavedArts = () => {
     setArtsLoading(true);
-    setArtsError("");
     ListSavedArts()
       .then((items: unknown) => {
         setSavedArts(parseSavedArts(items));
       })
       .catch((error: unknown) => {
-        console.error(error);
-        setArtsError("falha ao carregar artes");
+        addLog("error", "Falha ao carregar artes", error);
       })
       .finally(() => {
         setArtsLoading(false);
@@ -288,6 +290,10 @@ export function AgentPanel({ onReconfigure }: AgentPanelProps) {
     const offJob = EventsOn("ws:job", (value: unknown) => {
       const event = parseJobEvent(value);
       if (!event) return;
+
+      if (event.kind === "started") {
+        showToast(`🖨️ Novo pedido: ${event.customerName || "Cliente"} — ${event.files.length} arquivo(s)`);
+      }
 
       setCurrentJob(event);
       if (event.status === "printed" || event.status === "failed") {
@@ -361,7 +367,7 @@ export function AgentPanel({ onReconfigure }: AgentPanelProps) {
   const handleReconnect = () => {
     setStatus("connecting");
     Reconnect().catch((error: unknown) => {
-      console.error(error);
+      addLog("error", "Falha ao reconectar", error);
       setStatus("disconnected");
     });
   };
@@ -376,15 +382,14 @@ export function AgentPanel({ onReconfigure }: AgentPanelProps) {
     try {
       await ApplyUpdateAndRestart(updateInfo.downloadUrl);
     } catch (error) {
-      console.error(error);
+      addLog("error", "Falha ao atualizar", error);
       setUpdating(false);
     }
   };
 
   const handleOpenHotFolder = () => {
     OpenHotFolder().catch((error: unknown) => {
-      console.error(error);
-      setArtsError("falha ao abrir pasta");
+      addLog("error", "Falha ao abrir pasta", error);
     });
   };
 
@@ -399,8 +404,7 @@ export function AgentPanel({ onReconfigure }: AgentPanelProps) {
         setSavedArts([]);
       })
       .catch((error: unknown) => {
-        console.error(error);
-        setArtsError("falha ao esvaziar pasta");
+        addLog("error", "Falha ao esvaziar pasta", error);
       })
       .finally(() => {
         setArtsLoading(false);
@@ -687,7 +691,7 @@ export function AgentPanel({ onReconfigure }: AgentPanelProps) {
                 </button>
               </div>
             </div>
-            {artsError && <div className="arts-error">{artsError}</div>}
+
             {artsLoading ? (
               <div className="empty">
                 <IconRefresh
@@ -758,6 +762,9 @@ export function AgentPanel({ onReconfigure }: AgentPanelProps) {
           </button>
         </div>
       )}
+
+      <ErrorLog logs={logs} onClear={clearLogs} />
+      <ToastContainer toasts={toasts} />
 
       <footer className="actions">
         <button type="button" className="btn-ghost" onClick={handleReconnect}>

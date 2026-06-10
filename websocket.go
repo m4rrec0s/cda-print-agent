@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -42,6 +43,8 @@ type WebSocketManager struct {
 	apiURL          string
 	agentKey        string
 	hotFolderPath   string
+	deviceID        string
+	deviceName      string
 	printerConfig   PrinterConfigMap
 	connected       bool
 	connecting      bool
@@ -56,12 +59,14 @@ type WebSocketManager struct {
 
 var wsManager *WebSocketManager
 
-func NewWebSocketManager(url string, apiURL string, agentKey string, hotFolderPath string) *WebSocketManager {
+func NewWebSocketManager(url string, apiURL string, agentKey string, hotFolderPath string, deviceID string, deviceName string) *WebSocketManager {
 	return &WebSocketManager{
 		url:           url,
 		apiURL:        apiURL,
 		agentKey:      agentKey,
 		hotFolderPath: hotFolderPath,
+		deviceID:      deviceID,
+		deviceName:    deviceName,
 		done:          make(chan struct{}),
 		statusCh:      make(chan string, 8),
 		processedJobs: make(map[string]bool),
@@ -129,6 +134,17 @@ func (wm *WebSocketManager) Connect() error {
 	})
 
 	log.Printf("event=websocket_connected url=%s", wm.url)
+
+	// Send HANDSHAKE to identify this device
+	handshakeData, _ := json.Marshal(map[string]string{
+		"type":       "HANDSHAKE",
+		"deviceId":   wm.deviceID,
+		"deviceName": wm.deviceName,
+		"ip":         getLocalIP(),
+	})
+	wm.writeMu.Lock()
+	_ = conn.WriteMessage(websocket.TextMessage, handshakeData)
+	wm.writeMu.Unlock()
 
 	// Request printer config from backend on connection
 	msg := WSMessage{
@@ -207,6 +223,7 @@ func (wm *WebSocketManager) StartListening(ctx context.Context) {
 
 	go wm.startPingLoop(ctx)
 	go wm.readLoop(ctx)
+	go wm.startPrinterStatusPoller(ctx)
 }
 
 func (wm *WebSocketManager) Stop() {
@@ -513,4 +530,64 @@ func (wm *WebSocketManager) emitStatus(status string) {
 	case wm.statusCh <- status:
 	default:
 	}
+}
+
+func (wm *WebSocketManager) startPrinterStatusPoller(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	// Send initial status immediately
+	wm.sendPrinterStatusUpdate()
+
+	for {
+		select {
+		case <-wm.done:
+			return
+		case <-ticker.C:
+			if !wm.IsConnected() {
+				continue
+			}
+			wm.sendPrinterStatusUpdate()
+		}
+	}
+}
+
+func (wm *WebSocketManager) sendPrinterStatusUpdate() {
+	printers, err := GetPrintersWithStatus()
+	if err != nil {
+		log.Printf("event=printer_status_poll_failed error=%q", err.Error())
+		return
+	}
+
+	data, _ := json.Marshal(map[string]interface{}{
+		"type":     "PRINTER_STATUS_UPDATE",
+		"printers": printers,
+	})
+
+	wm.mu.RLock()
+	conn := wm.conn
+	connected := wm.connected
+	wm.mu.RUnlock()
+
+	if !connected || conn == nil {
+		return
+	}
+
+	wm.writeMu.Lock()
+	conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	_ = conn.WriteMessage(websocket.TextMessage, data)
+	wm.writeMu.Unlock()
+}
+
+func getLocalIP() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+	for _, addr := range addrs {
+		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() && ipnet.IP.To4() != nil {
+			return ipnet.IP.String()
+		}
+	}
+	return ""
 }

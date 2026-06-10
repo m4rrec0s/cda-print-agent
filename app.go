@@ -56,7 +56,7 @@ func (a *App) startup(ctx context.Context) {
 	log.Printf("event=startup ws_url=%s api_url=%s hot_folder_configured=%t",
 		cfg.WSURL, cfg.APIURL, cfg.HotFolderPath != "")
 
-	wsManager = NewWebSocketManager(cfg.WSURL, cfg.APIURL, cfg.AgentKey, cfg.HotFolderPath)
+	wsManager = NewWebSocketManager(cfg.WSURL, cfg.APIURL, cfg.AgentKey, cfg.HotFolderPath, cfg.DeviceID, cfg.DeviceName)
 	a.tray = NewTrayManager(wsManager.StatusUpdates())
 	a.tray.Start(a)
 
@@ -110,7 +110,7 @@ func (a *App) SaveAgentConfig(wsURL string, apiURL string, agentKey string, hotF
 		return err
 	}
 
-	wsManager = NewWebSocketManager(cfg.WSURL, cfg.APIURL, cfg.AgentKey, cfg.HotFolderPath)
+	wsManager = NewWebSocketManager(cfg.WSURL, cfg.APIURL, cfg.AgentKey, cfg.HotFolderPath, cfg.DeviceID, cfg.DeviceName)
 	if a.tray == nil {
 		a.tray = NewTrayManager(wsManager.StatusUpdates())
 		a.tray.Start(a)

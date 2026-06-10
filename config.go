@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 type AgentConfig struct {
@@ -14,6 +16,8 @@ type AgentConfig struct {
 	APIURL        string `json:"apiUrl"`
 	AgentKey      string `json:"agentKey"`
 	HotFolderPath string `json:"hotFolderPath"`
+	DeviceID      string `json:"deviceId,omitempty"`
+	DeviceName    string `json:"deviceName,omitempty"`
 }
 
 func getConfigDir() string {
@@ -39,6 +43,20 @@ func LoadConfigFromFile() (*AgentConfig, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
+
+	changed := false
+	if cfg.DeviceID == "" {
+		cfg.DeviceID = uuid.New().String()
+		changed = true
+	}
+	if cfg.DeviceName == "" {
+		cfg.DeviceName, _ = os.Hostname()
+		changed = true
+	}
+	if changed {
+		_ = SaveConfigFile(cfg)
+	}
+
 	return &cfg, nil
 }
 
