@@ -223,7 +223,6 @@ func (wm *WebSocketManager) StartListening(ctx context.Context) {
 
 	go wm.startPingLoop(ctx)
 	go wm.readLoop(ctx)
-	go wm.startPrinterStatusPoller(ctx)
 }
 
 func (wm *WebSocketManager) Stop() {
@@ -530,53 +529,6 @@ func (wm *WebSocketManager) emitStatus(status string) {
 	case wm.statusCh <- status:
 	default:
 	}
-}
-
-func (wm *WebSocketManager) startPrinterStatusPoller(ctx context.Context) {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	// Send initial status immediately
-	wm.sendPrinterStatusUpdate()
-
-	for {
-		select {
-		case <-wm.done:
-			return
-		case <-ticker.C:
-			if !wm.IsConnected() {
-				continue
-			}
-			wm.sendPrinterStatusUpdate()
-		}
-	}
-}
-
-func (wm *WebSocketManager) sendPrinterStatusUpdate() {
-	printers, err := GetPrintersWithStatus()
-	if err != nil {
-		log.Printf("event=printer_status_poll_failed error=%q", err.Error())
-		return
-	}
-
-	data, _ := json.Marshal(map[string]interface{}{
-		"type":     "PRINTER_STATUS_UPDATE",
-		"printers": printers,
-	})
-
-	wm.mu.RLock()
-	conn := wm.conn
-	connected := wm.connected
-	wm.mu.RUnlock()
-
-	if !connected || conn == nil {
-		return
-	}
-
-	wm.writeMu.Lock()
-	conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	_ = conn.WriteMessage(websocket.TextMessage, data)
-	wm.writeMu.Unlock()
 }
 
 func getLocalIP() string {
