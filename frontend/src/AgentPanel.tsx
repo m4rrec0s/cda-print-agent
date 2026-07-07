@@ -31,7 +31,11 @@ import {
   IconChevronDown,
 } from "@tabler/icons-react";
 
-type ConnectionStatus = "connected" | "connecting" | "disconnected";
+type ConnectionStatus =
+  | "connected"
+  | "inactive"
+  | "connecting"
+  | "disconnected";
 type FileStatus = "pending" | "downloading" | "moving" | "printed" | "failed";
 type ActiveTab = "panel" | "arts";
 
@@ -167,6 +171,18 @@ const parseFileStatus = (value: unknown): FileStatus => {
   return "pending";
 };
 
+const parseConnectionStatus = (value: unknown): ConnectionStatus => {
+  if (
+    value === "connected" ||
+    value === "inactive" ||
+    value === "connecting" ||
+    value === "disconnected"
+  ) {
+    return value;
+  }
+  return "disconnected";
+};
+
 function FileStatusIcon({ status }: { status: string }) {
   switch (status) {
     case "printed":
@@ -250,13 +266,7 @@ export function AgentPanel({ onReconfigure }: AgentPanelProps) {
 
   useEffect(() => {
     GetStatus().then((value: string) => {
-      setStatus(
-        value === "connected"
-          ? "connected"
-          : value === "connecting"
-            ? "connecting"
-            : "disconnected",
-      );
+      setStatus(parseConnectionStatus(value));
     });
 
     GetPrinterConfig().then(
@@ -278,13 +288,7 @@ export function AgentPanel({ onReconfigure }: AgentPanelProps) {
       .catch(() => {});
 
     const offStatus = EventsOn("ws:status", (value: unknown) => {
-      setStatus(
-        value === "connected"
-          ? "connected"
-          : value === "connecting"
-            ? "connecting"
-            : "disconnected",
-      );
+      setStatus(parseConnectionStatus(value));
     });
 
     const offJob = EventsOn("ws:job", (value: unknown) => {
@@ -414,6 +418,8 @@ export function AgentPanel({ onReconfigure }: AgentPanelProps) {
   const statusLabel =
     status === "connected"
       ? "Conectado"
+      : status === "inactive"
+        ? "Inativo"
       : status === "connecting"
         ? "Conectando..."
         : "Desconectado";

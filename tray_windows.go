@@ -97,6 +97,10 @@ func (tm *TrayManager) setStatus(status string) {
 		tm.statusItem.SetTitle("Status: 🟢 Conectado")
 		return
 	}
+	if status == "inactive" {
+		tm.statusItem.SetTitle("Status: 🟡 Inativo")
+		return
+	}
 
 	tm.statusItem.SetTitle("Status: 🔴 Desconectado")
 }

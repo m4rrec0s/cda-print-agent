@@ -28,6 +28,7 @@ type WSMessage struct {
 	PrinterDetails  []PrinterInfo     `json:"printerDetails,omitempty"`
 	SelectedPrinter string            `json:"selectedPrinter,omitempty"`
 	Config          *PrinterConfigMap `json:"config,omitempty"`
+	IsDefault       *bool             `json:"isDefault,omitempty"`
 	Version         string            `json:"version,omitempty"`
 	DownloadURL     string            `json:"downloadUrl,omitempty"`
 	ReleaseNotes    string            `json:"releaseNotes,omitempty"`
@@ -46,6 +47,8 @@ type WebSocketManager struct {
 	deviceID        string
 	deviceName      string
 	printerConfig   PrinterConfigMap
+	isDefault       bool
+	roleKnown       bool
 	connected       bool
 	connecting      bool
 	done            chan struct{}
@@ -59,7 +62,15 @@ type WebSocketManager struct {
 
 var wsManager *WebSocketManager
 
-func NewWebSocketManager(url string, apiURL string, agentKey string, hotFolderPath string, deviceID string, deviceName string) *WebSocketManager {
+func NewWebSocketManager(
+	url string,
+	apiURL string,
+	agentKey string,
+	hotFolderPath string,
+	deviceID string,
+	deviceName string,
+	initialPrinterConfig PrinterConfigMap,
+) *WebSocketManager {
 	return &WebSocketManager{
 		url:           url,
 		apiURL:        apiURL,
@@ -67,6 +78,7 @@ func NewWebSocketManager(url string, apiURL string, agentKey string, hotFolderPa
 		hotFolderPath: hotFolderPath,
 		deviceID:      deviceID,
 		deviceName:    deviceName,
+		printerConfig: initialPrinterConfig,
 		done:          make(chan struct{}),
 		statusCh:      make(chan string, 8),
 		processedJobs: make(map[string]bool),
@@ -100,6 +112,22 @@ func (wm *WebSocketManager) StatusUpdates() <-chan string {
 	return wm.statusCh
 }
 
+func (wm *WebSocketManager) ConnectionStatus() string {
+	wm.mu.RLock()
+	defer wm.mu.RUnlock()
+
+	if wm.connecting {
+		return "connecting"
+	}
+	if !wm.connected || wm.conn == nil {
+		return "disconnected"
+	}
+	if wm.roleKnown && !wm.isDefault {
+		return "inactive"
+	}
+	return "connected"
+}
+
 func (wm *WebSocketManager) Connect() error {
 	wm.setConnecting(true)
 	headers := http.Header{}
@@ -119,7 +147,7 @@ func (wm *WebSocketManager) Connect() error {
 	wm.connected = true
 	wm.connecting = false
 	wm.mu.Unlock()
-	wm.emitStatus("connected")
+	wm.emitStatus(wm.ConnectionStatus())
 
 	conn.SetReadDeadline(time.Now().Add(90 * time.Second))
 	conn.SetPongHandler(func(string) error {
@@ -216,7 +244,7 @@ func (wm *WebSocketManager) SendMessage(msg WSMessage) error {
 func (wm *WebSocketManager) StartListening(ctx context.Context) {
 	// Emit current status immediately
 	if wm.IsConnected() {
-		runtime.EventsEmit(ctx, "ws:status", "connected")
+		runtime.EventsEmit(ctx, "ws:status", wm.ConnectionStatus())
 	} else {
 		runtime.EventsEmit(ctx, "ws:status", "disconnected")
 	}
@@ -248,7 +276,7 @@ func (wm *WebSocketManager) readLoop(ctx context.Context) {
 				runtime.EventsEmit(ctx, "ws:status", "disconnected")
 				continue
 			}
-			runtime.EventsEmit(ctx, "ws:status", "connected")
+			runtime.EventsEmit(ctx, "ws:status", wm.ConnectionStatus())
 		}
 
 		wm.mu.RLock()
@@ -282,6 +310,10 @@ func (wm *WebSocketManager) readLoop(ctx context.Context) {
 			wm.handlePrintJob(ctx, msg)
 		case "PRINTER_CONFIG_UPDATE":
 			wm.handlePrinterConfigUpdate(ctx, msg)
+		case "HANDSHAKE_ACK":
+			wm.handleHandshakeAck(ctx, msg)
+		case "DEVICE_ROLE_UPDATE":
+			wm.handleDeviceRoleUpdate(ctx, msg)
 		case "UPDATE_AVAILABLE":
 			wm.handleUpdateAvailable(ctx, msg)
 		}
@@ -324,6 +356,7 @@ func (wm *WebSocketManager) handleAuthorizePrinter(ctx context.Context, msg WSMe
 		wm.printerConfig.Photo = &s
 	}
 	wm.mu.Unlock()
+	_ = SavePrinterConfigToFile(wm.GetPrinterConfig())
 
 	log.Printf("event=printer_authorized printer=%q", msg.SelectedPrinter)
 	runtime.EventsEmit(ctx, "ws:message", map[string]string{
@@ -342,10 +375,38 @@ func (wm *WebSocketManager) handlePrinterConfigUpdate(ctx context.Context, msg W
 
 	wm.mu.Lock()
 	wm.printerConfig = *msg.Config
+	if msg.IsDefault != nil {
+		wm.isDefault = *msg.IsDefault
+		wm.roleKnown = true
+	}
 	wm.mu.Unlock()
+	_ = SavePrinterConfigToFile(*msg.Config)
 
-	log.Printf("event=printer_config_updated photo=%v letter=%v", msg.Config.Photo, msg.Config.Letter)
+	log.Printf("event=printer_config_updated photo=%v letter=%v is_default=%v", msg.Config.Photo, msg.Config.Letter, msg.IsDefault)
 	runtime.EventsEmit(ctx, "ws:printerConfig", msg.Config)
+	runtime.EventsEmit(ctx, "ws:status", wm.ConnectionStatus())
+}
+
+func (wm *WebSocketManager) handleHandshakeAck(ctx context.Context, msg WSMessage) {
+	if msg.IsDefault == nil {
+		return
+	}
+	wm.mu.Lock()
+	wm.isDefault = *msg.IsDefault
+	wm.roleKnown = true
+	wm.mu.Unlock()
+	runtime.EventsEmit(ctx, "ws:status", wm.ConnectionStatus())
+}
+
+func (wm *WebSocketManager) handleDeviceRoleUpdate(ctx context.Context, msg WSMessage) {
+	if msg.IsDefault == nil {
+		return
+	}
+	wm.mu.Lock()
+	wm.isDefault = *msg.IsDefault
+	wm.roleKnown = true
+	wm.mu.Unlock()
+	runtime.EventsEmit(ctx, "ws:status", wm.ConnectionStatus())
 }
 
 func (wm *WebSocketManager) handleUpdateAvailable(ctx context.Context, msg WSMessage) {
@@ -507,12 +568,11 @@ func (wm *WebSocketManager) setConnected(connected bool) {
 	wm.mu.Lock()
 	wm.connected = connected
 	wm.connecting = false
-	wm.mu.Unlock()
-	if connected {
-		wm.emitStatus("connected")
-	} else {
-		wm.emitStatus("disconnected")
+	if !connected {
+		wm.roleKnown = false
 	}
+	wm.mu.Unlock()
+	wm.emitStatus(wm.ConnectionStatus())
 }
 
 func (wm *WebSocketManager) setConnecting(connecting bool) {

@@ -56,7 +56,7 @@ func (a *App) startup(ctx context.Context) {
 	log.Printf("event=startup ws_url=%s api_url=%s hot_folder_configured=%t",
 		cfg.WSURL, cfg.APIURL, cfg.HotFolderPath != "")
 
-	wsManager = NewWebSocketManager(cfg.WSURL, cfg.APIURL, cfg.AgentKey, cfg.HotFolderPath, cfg.DeviceID, cfg.DeviceName)
+	wsManager = NewWebSocketManager(cfg.WSURL, cfg.APIURL, cfg.AgentKey, cfg.HotFolderPath, cfg.DeviceID, cfg.DeviceName, cfg.ToPrinterConfig())
 	a.tray = NewTrayManager(wsManager.StatusUpdates())
 	a.tray.Start(a)
 
@@ -106,6 +106,8 @@ func (a *App) SaveAgentConfig(wsURL string, apiURL string, agentKey string, hotF
 	}
 	if existing != nil {
 		cfg.DeviceID = existing.DeviceID
+		cfg.PrinterPhoto = existing.PrinterPhoto
+		cfg.PrinterLetter = existing.PrinterLetter
 	}
 	if cfg.DeviceName == "" && existing != nil {
 		cfg.DeviceName = existing.DeviceName
@@ -119,7 +121,7 @@ func (a *App) SaveAgentConfig(wsURL string, apiURL string, agentKey string, hotF
 		return err
 	}
 
-	wsManager = NewWebSocketManager(cfg.WSURL, cfg.APIURL, cfg.AgentKey, cfg.HotFolderPath, cfg.DeviceID, cfg.DeviceName)
+	wsManager = NewWebSocketManager(cfg.WSURL, cfg.APIURL, cfg.AgentKey, cfg.HotFolderPath, cfg.DeviceID, cfg.DeviceName, cfg.ToPrinterConfig())
 	if a.tray == nil {
 		a.tray = NewTrayManager(wsManager.StatusUpdates())
 		a.tray.Start(a)
@@ -130,7 +132,7 @@ func (a *App) SaveAgentConfig(wsURL string, apiURL string, agentKey string, hotF
 		wailsruntime.EventsEmit(a.ctx, "ws:status", "disconnected")
 		return err
 	}
-	wailsruntime.EventsEmit(a.ctx, "ws:status", "connected")
+	wailsruntime.EventsEmit(a.ctx, "ws:status", wsManager.ConnectionStatus())
 	wsManager.StartListening(a.ctx)
 	a.startUpdateTicker(a.ctx, cfg.APIURL, cfg.AgentKey)
 	return nil
@@ -142,8 +144,8 @@ func (a *App) GetStatus() string {
 	if wsManager != nil && wsManager.IsConnecting() {
 		return "connecting"
 	}
-	if wsManager != nil && wsManager.IsConnected() {
-		return "connected"
+	if wsManager != nil {
+		return wsManager.ConnectionStatus()
 	}
 	return "disconnected"
 }
@@ -269,6 +271,7 @@ func (a *App) SetSelectedPrinter(role string, printerName string) {
 	}
 	wsManager.printerConfig = cfg
 	wsManager.mu.Unlock()
+	_ = SavePrinterConfigToFile(cfg)
 	log.Printf("event=printer_selected role=%q printer=%q", role, printerName)
 
 	// Send authorization to backend
@@ -298,7 +301,7 @@ func (a *App) Reconnect() error {
 		wailsruntime.EventsEmit(a.ctx, "ws:status", "disconnected")
 		return err
 	}
-	wailsruntime.EventsEmit(a.ctx, "ws:status", "connected")
+	wailsruntime.EventsEmit(a.ctx, "ws:status", wsManager.ConnectionStatus())
 	return nil
 }
 

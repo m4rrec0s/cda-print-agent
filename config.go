@@ -12,12 +12,14 @@ import (
 )
 
 type AgentConfig struct {
-	WSURL         string `json:"wsUrl"`
-	APIURL        string `json:"apiUrl"`
-	AgentKey      string `json:"agentKey"`
-	HotFolderPath string `json:"hotFolderPath"`
-	DeviceID      string `json:"deviceId,omitempty"`
-	DeviceName    string `json:"deviceName,omitempty"`
+	WSURL         string  `json:"wsUrl"`
+	APIURL        string  `json:"apiUrl"`
+	AgentKey      string  `json:"agentKey"`
+	HotFolderPath string  `json:"hotFolderPath"`
+	DeviceID      string  `json:"deviceId,omitempty"`
+	DeviceName    string  `json:"deviceName,omitempty"`
+	PrinterPhoto  *string `json:"printerPhoto,omitempty"`
+	PrinterLetter *string `json:"printerLetter,omitempty"`
 }
 
 func getConfigDir() string {
@@ -94,4 +96,21 @@ func ValidateConfig(cfg *AgentConfig) error {
 	}
 
 	return nil
+}
+
+func (cfg AgentConfig) ToPrinterConfig() PrinterConfigMap {
+	return PrinterConfigMap{
+		Photo:  cfg.PrinterPhoto,
+		Letter: cfg.PrinterLetter,
+	}
+}
+
+func SavePrinterConfigToFile(printerConfig PrinterConfigMap) error {
+	cfg, err := LoadConfigFromFile()
+	if err != nil {
+		return err
+	}
+	cfg.PrinterPhoto = printerConfig.Photo
+	cfg.PrinterLetter = printerConfig.Letter
+	return SaveConfigFile(*cfg)
 }

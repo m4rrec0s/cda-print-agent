@@ -5,7 +5,10 @@ export namespace main {
 	    apiUrl: string;
 	    agentKey: string;
 	    hotFolderPath: string;
-	    deviceName: string;
+	    deviceId?: string;
+	    deviceName?: string;
+	    printerPhoto?: string;
+	    printerLetter?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new AgentConfig(source);
@@ -17,7 +20,10 @@ export namespace main {
 	        this.apiUrl = source["apiUrl"];
 	        this.agentKey = source["agentKey"];
 	        this.hotFolderPath = source["hotFolderPath"];
+	        this.deviceId = source["deviceId"];
 	        this.deviceName = source["deviceName"];
+	        this.printerPhoto = source["printerPhoto"];
+	        this.printerLetter = source["printerLetter"];
 	    }
 	}
 	export class SavedArtInfo {
