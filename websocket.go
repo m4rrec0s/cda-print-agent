@@ -14,9 +14,18 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
+type PrintSettings struct {
+	PaperSize    string `json:"paperSize,omitempty"`
+	Orientation  string `json:"orientation,omitempty"`
+	FitToPage    bool   `json:"fitToPage,omitempty"`
+	CustomFlags  string `json:"customFlags,omitempty"`
+}
+
 type PrinterConfigMap struct {
-	Photo  *string `json:"photo"`
-	Letter *string `json:"letter"`
+	Photo         *string       `json:"photo"`
+	Letter        *string       `json:"letter"`
+	PhotoSettings *PrintSettings `json:"photoSettings,omitempty"`
+	LetterSettings *PrintSettings `json:"letterSettings,omitempty"`
 }
 
 type WSMessage struct {
@@ -106,6 +115,18 @@ func (wm *WebSocketManager) GetPrinterConfig() PrinterConfigMap {
 	wm.mu.RLock()
 	defer wm.mu.RUnlock()
 	return wm.printerConfig
+}
+
+func (wm *WebSocketManager) GetPrintSettings(role string) *PrintSettings {
+	wm.mu.RLock()
+	defer wm.mu.RUnlock()
+	switch role {
+	case "photo":
+		return wm.printerConfig.PhotoSettings
+	case "letter":
+		return wm.printerConfig.LetterSettings
+	}
+	return nil
 }
 
 func (wm *WebSocketManager) StatusUpdates() <-chan string {
@@ -382,7 +403,8 @@ func (wm *WebSocketManager) handlePrinterConfigUpdate(ctx context.Context, msg W
 	wm.mu.Unlock()
 	_ = SavePrinterConfigToFile(*msg.Config)
 
-	log.Printf("event=printer_config_updated photo=%v letter=%v is_default=%v", msg.Config.Photo, msg.Config.Letter, msg.IsDefault)
+	log.Printf("event=printer_config_updated photo=%v letter=%v photo_settings=%v letter_settings=%v is_default=%v",
+		msg.Config.Photo, msg.Config.Letter, msg.Config.PhotoSettings, msg.Config.LetterSettings, msg.IsDefault)
 	runtime.EventsEmit(ctx, "ws:printerConfig", msg.Config)
 	runtime.EventsEmit(ctx, "ws:status", wm.ConnectionStatus())
 }
@@ -516,7 +538,11 @@ func (wm *WebSocketManager) handlePrintJob(ctx context.Context, msg WSMessage) {
 			wm.sendFileEvent(ctx, job.JobID, fileIndex, stepType, errMsg)
 		}
 
-		err := ProcessPrintJob(ctx, wm.apiURL, wm.agentKey, wm.hotFolderPath, resolvePrinter, job, func(event JobUIEvent) {
+		resolvePrintSettings := func(role string) *PrintSettings {
+			return wm.GetPrintSettings(role)
+		}
+
+		err := ProcessPrintJob(ctx, wm.apiURL, wm.agentKey, wm.hotFolderPath, resolvePrinter, resolvePrintSettings, job, func(event JobUIEvent) {
 			runtime.EventsEmit(ctx, "ws:job", event)
 		}, emitBackend)
 

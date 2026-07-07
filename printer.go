@@ -135,6 +135,7 @@ func GetPrintersWithStatus() ([]PrinterInfo, error) {
 }
 
 type PrinterResolver func(role string) string
+type PrintSettingsResolver func(role string) *PrintSettings
 
 func ProcessPrintJob(
 	ctx context.Context,
@@ -142,6 +143,7 @@ func ProcessPrintJob(
 	agentKey string,
 	hotFolderPath string,
 	resolvePrinter PrinterResolver,
+	resolvePrintSettings PrintSettingsResolver,
 	job PrintJob,
 	emit func(JobUIEvent),
 	onStep StepCallback,
@@ -214,7 +216,7 @@ func ProcessPrintJob(
 		return handlePDFFallback(ctx, job, hotFolderPath, jobDir, downloadedPaths, statuses, emit, onStep)
 	}
 
-	return handlePrintToFolder(ctx, job, hotFolderPath, downloadedPaths, statuses, emit, onStep, resolvePrinter)
+	return handlePrintToFolder(ctx, job, hotFolderPath, downloadedPaths, statuses, emit, onStep, resolvePrinter, resolvePrintSettings)
 }
 
 func handlePDFFallback(
@@ -250,7 +252,7 @@ func handlePDFFallback(
 	return nil
 }
 
-func printFileToPrinterWindows(filePath string, printerName string) error {
+func printFileToPrinterWindows(filePath string, printerName string, printSettings string) error {
 	if printerName == "" {
 		return fmt.Errorf("nenhuma impressora selecionada")
 	}
@@ -264,12 +266,12 @@ func printFileToPrinterWindows(filePath string, printerName string) error {
 	)
 
 	if ext == ".pdf" {
-		return printPDFViaSumatra(filePath, printerName)
+		return printPDFViaSumatra(filePath, printerName, printSettings)
 	}
 
 	switch ext {
 	case ".png", ".jpg", ".jpeg", ".bmp":
-		return printImage(filePath, printerName)
+		return printImage(filePath, printerName, printSettings)
 	case ".doc", ".docx":
 		return printWord(filePath, printerName)
 	default:
@@ -277,7 +279,7 @@ func printFileToPrinterWindows(filePath string, printerName string) error {
 	}
 }
 
-func printPDFViaSumatra(filePath string, printerName string) error {
+func printPDFViaSumatra(filePath string, printerName string, printSettings string) error {
 	sumatraPath, err := getSumatraPath()
 	if err != nil {
 		log.Printf("event=sumatra_extract_failed error=%q — fallback para PrintTo", err)
@@ -286,11 +288,12 @@ func printPDFViaSumatra(filePath string, printerName string) error {
 
 	log.Printf("event=pdf_print_sumatra file=%q printer=%q sumatra=%q", filePath, printerName, sumatraPath)
 
-	cmd := newHiddenCommand(sumatraPath,
-		"-print-to", printerName,
-		"-silent",
-		filePath,
-	)
+	args := []string{"-print-to", printerName, "-silent"}
+	if printSettings != "" {
+		args = append(args, "-print-settings", printSettings)
+	}
+	args = append(args, filePath)
+	cmd := newHiddenCommand(sumatraPath, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -302,7 +305,7 @@ func printPDFViaSumatra(filePath string, printerName string) error {
 	return nil
 }
 
-func printImage(filePath string, printerName string) error {
+func printImage(filePath string, printerName string, printSettings string) error {
 	cmd := newHiddenCommand("mspaint",
 		"/pt",
 		filePath,
@@ -313,7 +316,7 @@ func printImage(filePath string, printerName string) error {
 
 	if err := cmd.Run(); err != nil {
 		log.Printf("event=mspaint_failed error=%q fallback=sumatra", err.Error())
-		if sumatraErr := printPDFViaSumatra(filePath, printerName); sumatraErr != nil {
+		if sumatraErr := printPDFViaSumatra(filePath, printerName, printSettings); sumatraErr != nil {
 			log.Printf("event=sumatra_image_failed error=%q fallback=PrintTo", sumatraErr.Error())
 			return printViaStartProcess(filePath, printerName)
 		}
@@ -432,6 +435,7 @@ func handlePrintToFolder(
 	emit func(JobUIEvent),
 	onStep StepCallback,
 	resolvePrinter PrinterResolver,
+	resolvePrintSettings PrintSettingsResolver,
 ) error {
 	for index, file := range job.Files {
 		printerName := resolvePrinter(file.PrinterRole)
@@ -472,8 +476,9 @@ func handlePrintToFolder(
 
 		if runtime.GOOS == "windows" && printerName != "" {
 			onStep("SENDING_TO_PRINTER", index, "")
-			log.Printf("event=printing_file file=%q printer=%q", destPath, printerName)
-			if err := printFileToPrinterWindows(destPath, printerName); err != nil {
+			printSettings := buildPrintSettingsString(resolvePrintSettings(file.PrinterRole))
+			log.Printf("event=printing_file file=%q printer=%q settings=%q", destPath, printerName, printSettings)
+			if err := printFileToPrinterWindows(destPath, printerName, printSettings); err != nil {
 				log.Printf("event=print_failed file=%q printer=%q error=%q", destPath, printerName, err.Error())
 				statuses[index].Status = "failed"
 				statuses[index].Error = err.Error()
@@ -706,6 +711,32 @@ func moveToHotFolder(tempPath string, hotFolderPath string, jobID string, file P
 
 	log.Printf("event=file_copied_to_hot_folder job_id=%s file=%q destination=%q", jobID, file.Name, destinationPath)
 	return destinationPath, nil
+}
+
+func buildPrintSettingsString(settings *PrintSettings) string {
+	if settings == nil {
+		return ""
+	}
+
+	var parts []string
+
+	if settings.PaperSize != "" {
+		parts = append(parts, "paper="+settings.PaperSize)
+	}
+
+	if settings.Orientation != "" && settings.Orientation != "auto" {
+		parts = append(parts, settings.Orientation)
+	}
+
+	if settings.FitToPage {
+		parts = append(parts, "fit")
+	}
+
+	if settings.CustomFlags != "" {
+		parts = append(parts, settings.CustomFlags)
+	}
+
+	return strings.Join(parts, ",")
 }
 
 func emitJobEvent(

@@ -12,6 +12,7 @@ import {
   MinimizeToTray,
   OpenHotFolder,
   Reconnect,
+  Disconnect,
 } from "../wailsjs/go/main/App";
 import { EventsOn } from "../wailsjs/runtime";
 import {
@@ -29,6 +30,8 @@ import {
   IconTrash,
   IconFiles,
   IconChevronDown,
+  IconPlugConnected,
+  IconPlug,
 } from "@tabler/icons-react";
 
 type ConnectionStatus =
@@ -240,6 +243,8 @@ export function AgentPanel({ onReconfigure }: AgentPanelProps) {
   const [printerConfig, setPrinterConfig] = useState<{
     photo: string | null;
     letter: string | null;
+    photoSettings?: { paperSize?: string; orientation?: string; fitToPage?: boolean; customFlags?: string } | null;
+    letterSettings?: { paperSize?: string; orientation?: string; fitToPage?: boolean; customFlags?: string } | null;
   }>({ photo: null, letter: null });
   const [printerConfigLoading, setPrinterConfigLoading] = useState(true);
   const [savedArts, setSavedArts] = useState<SavedArtInfo[]>([]);
@@ -270,10 +275,12 @@ export function AgentPanel({ onReconfigure }: AgentPanelProps) {
     });
 
     GetPrinterConfig().then(
-      (cfg: { photo?: string | null; letter?: string | null }) => {
+      (cfg: { photo?: string | null; letter?: string | null; photoSettings?: any; letterSettings?: any }) => {
         setPrinterConfig({
           photo: cfg.photo ?? null,
           letter: cfg.letter ?? null,
+          photoSettings: cfg.photoSettings ?? null,
+          letterSettings: cfg.letterSettings ?? null,
         });
         if (cfg.photo || cfg.letter) setPrinterConfigLoading(false);
       },
@@ -318,10 +325,12 @@ export function AgentPanel({ onReconfigure }: AgentPanelProps) {
 
     const offPrinterConfig = EventsOn(
       "ws:printerConfig",
-      (cfg: { photo?: string | null; letter?: string | null }) => {
+      (cfg: { photo?: string | null; letter?: string | null; photoSettings?: any; letterSettings?: any }) => {
         setPrinterConfig({
           photo: cfg.photo ?? null,
           letter: cfg.letter ?? null,
+          photoSettings: cfg.photoSettings ?? null,
+          letterSettings: cfg.letterSettings ?? null,
         });
         setPrinterConfigLoading(false);
       },
@@ -368,12 +377,18 @@ export function AgentPanel({ onReconfigure }: AgentPanelProps) {
     });
   }, [history]);
 
-  const handleReconnect = () => {
-    setStatus("connecting");
-    Reconnect().catch((error: unknown) => {
-      addLog("error", "Falha ao reconectar", error);
-      setStatus("disconnected");
-    });
+  const handleToggleConnection = () => {
+    if (status === "connected" || status === "inactive") {
+      Disconnect().catch((error: unknown) => {
+        addLog("error", "Falha ao desconectar", error);
+      });
+    } else {
+      setStatus("connecting");
+      Reconnect().catch((error: unknown) => {
+        addLog("error", "Falha ao reconectar", error);
+        setStatus("disconnected");
+      });
+    }
   };
 
   const handleClose = () => {
@@ -427,6 +442,17 @@ export function AgentPanel({ onReconfigure }: AgentPanelProps) {
   const renderPrinterName = (value: string | null) => {
     if (printerConfigLoading) return "Carregando...";
     return value ?? "Não configurada";
+  };
+
+  const renderPrintSettings = (settings: { paperSize?: string; orientation?: string; fitToPage?: boolean; customFlags?: string } | null | undefined) => {
+    if (!settings) return null;
+    const parts: string[] = [];
+    if (settings.paperSize) parts.push(settings.paperSize);
+    if (settings.orientation && settings.orientation !== "auto") parts.push(settings.orientation);
+    if (settings.fitToPage) parts.push("fit");
+    if (settings.customFlags) parts.push(settings.customFlags);
+    if (parts.length === 0) return null;
+    return parts.join(", ");
   };
 
   const printerSummary = printerConfigLoading
@@ -533,6 +559,11 @@ export function AgentPanel({ onReconfigure }: AgentPanelProps) {
                       >
                         {renderPrinterName(printerConfig.photo)}
                       </div>
+                      {renderPrintSettings(printerConfig.photoSettings) && (
+                        <div className="printer-settings">
+                          {renderPrintSettings(printerConfig.photoSettings)}
+                        </div>
+                      )}
                     </div>
                     <div
                       className={`printer-status ${printerConfigLoading ? "loading" : printerConfig.photo ? "ok" : "warn"}`}
@@ -549,6 +580,11 @@ export function AgentPanel({ onReconfigure }: AgentPanelProps) {
                       >
                         {renderPrinterName(printerConfig.letter)}
                       </div>
+                      {renderPrintSettings(printerConfig.letterSettings) && (
+                        <div className="printer-settings">
+                          {renderPrintSettings(printerConfig.letterSettings)}
+                        </div>
+                      )}
                     </div>
                     <div
                       className={`printer-status ${printerConfigLoading ? "loading" : printerConfig.letter ? "ok" : "warn"}`}
@@ -773,8 +809,20 @@ export function AgentPanel({ onReconfigure }: AgentPanelProps) {
       <ToastContainer toasts={toasts} />
 
       <footer className="actions">
-        <button type="button" className="btn-ghost" onClick={handleReconnect}>
-          RECONECTAR
+        <button
+          type="button"
+          className={status === "connected" || status === "inactive" ? "btn-danger" : "btn-ghost"}
+          onClick={handleToggleConnection}
+        >
+          {status === "connected" || status === "inactive" ? (
+            <span style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+              <IconPlugConnected size={14} /> DESCONECTAR
+            </span>
+          ) : (
+            <span style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+              <IconPlug size={14} /> CONECTAR
+            </span>
+          )}
         </button>
         <button type="button" className="btn-primary" onClick={handleClose}>
           FECHAR

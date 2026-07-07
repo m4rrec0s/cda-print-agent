@@ -170,6 +170,21 @@ func (a *App) GetPrinterConfig() map[string]*string {
 	}
 }
 
+func (a *App) GetPrintSettings() map[string]interface{} {
+	if wsManager == nil {
+		return map[string]interface{}{}
+	}
+	cfg := wsManager.GetPrinterConfig()
+	result := map[string]interface{}{}
+	if cfg.PhotoSettings != nil {
+		result["photoSettings"] = cfg.PhotoSettings
+	}
+	if cfg.LetterSettings != nil {
+		result["letterSettings"] = cfg.LetterSettings
+	}
+	return result
+}
+
 func (a *App) ListSavedArts() ([]SavedArtInfo, error) {
 	cfg, err := LoadConfigFromFile()
 	if err != nil || cfg.HotFolderPath == "" {
@@ -302,6 +317,15 @@ func (a *App) Reconnect() error {
 		return err
 	}
 	wailsruntime.EventsEmit(a.ctx, "ws:status", wsManager.ConnectionStatus())
+	return nil
+}
+
+func (a *App) Disconnect() error {
+	if wsManager == nil {
+		return nil
+	}
+	wsManager.Stop()
+	wailsruntime.EventsEmit(a.ctx, "ws:status", "disconnected")
 	return nil
 }
 

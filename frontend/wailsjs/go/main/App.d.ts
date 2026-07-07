@@ -8,9 +8,13 @@ export function CheckUpdate():Promise<main.VersionInfo>;
 
 export function ClearHotFolder():Promise<void>;
 
+export function Disconnect():Promise<void>;
+
 export function GetAgentConfig():Promise<main.AgentConfig>;
 
 export function GetAutoStartEnabled():Promise<boolean>;
+
+export function GetPrintSettings():Promise<Record<string, any>>;
 
 export function GetPrinterConfig():Promise<Record<string, any>>;
 

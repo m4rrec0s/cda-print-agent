@@ -14,12 +14,20 @@ export function ClearHotFolder() {
   return window['go']['main']['App']['ClearHotFolder']();
 }
 
+export function Disconnect() {
+  return window['go']['main']['App']['Disconnect']();
+}
+
 export function GetAgentConfig() {
   return window['go']['main']['App']['GetAgentConfig']();
 }
 
 export function GetAutoStartEnabled() {
   return window['go']['main']['App']['GetAutoStartEnabled']();
+}
+
+export function GetPrintSettings() {
+  return window['go']['main']['App']['GetPrintSettings']();
 }
 
 export function GetPrinterConfig() {
