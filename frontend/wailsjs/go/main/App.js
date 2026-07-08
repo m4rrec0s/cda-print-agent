@@ -34,6 +34,10 @@ export function GetPrinterConfig() {
   return window['go']['main']['App']['GetPrinterConfig']();
 }
 
+export function GetPrinterPaperSizes(arg1) {
+  return window['go']['main']['App']['GetPrinterPaperSizes'](arg1);
+}
+
 export function GetPrintersList() {
   return window['go']['main']['App']['GetPrintersList']();
 }

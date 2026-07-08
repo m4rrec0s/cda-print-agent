@@ -45,6 +45,8 @@ type WSMessage struct {
 	FileStatus      string            `json:"fileStatus,omitempty"`
 	Timestamp       string            `json:"timestamp,omitempty"`
 	Error           string            `json:"error,omitempty"`
+	PrinterName     string            `json:"printerName,omitempty"`
+	PaperSizes      []PaperSizeInfo   `json:"paperSizes,omitempty"`
 }
 
 type WebSocketManager struct {
@@ -337,6 +339,8 @@ func (wm *WebSocketManager) readLoop(ctx context.Context) {
 			wm.handleDeviceRoleUpdate(ctx, msg)
 		case "UPDATE_AVAILABLE":
 			wm.handleUpdateAvailable(ctx, msg)
+		case "GET_PAPER_SIZES":
+			wm.handleGetPaperSizes(ctx, msg)
 		}
 	}
 }
@@ -366,6 +370,27 @@ func (wm *WebSocketManager) handleCheckPrinter(ctx context.Context) {
 		"timestamp": time.Now().Format("15:04:05"),
 	})
 	runtime.EventsEmit(ctx, "ws:printers", printers)
+}
+
+func (wm *WebSocketManager) handleGetPaperSizes(ctx context.Context, msg WSMessage) {
+	printerName := msg.PrinterName
+	if printerName == "" {
+		log.Printf("event=get_paper_sizes_failed reason=empty_printer_name")
+		return
+	}
+	sizes, err := GetPrinterPaperSizes(printerName)
+	if err != nil {
+		log.Printf("event=get_paper_sizes_failed printer=%q error=%q", printerName, err.Error())
+		sizes = []PaperSizeInfo{}
+	}
+	response := WSMessage{
+		Type:       "PAPER_SIZES_RESPONSE",
+		PrinterName: printerName,
+		PaperSizes: sizes,
+	}
+	if err := wm.SendMessage(response); err != nil {
+		log.Printf("event=paper_sizes_send_failed error=%q", err.Error())
+	}
 }
 
 func (wm *WebSocketManager) handleAuthorizePrinter(ctx context.Context, msg WSMessage) {

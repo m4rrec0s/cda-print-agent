@@ -18,6 +18,8 @@ export function GetPrintSettings():Promise<Record<string, any>>;
 
 export function GetPrinterConfig():Promise<Record<string, any>>;
 
+export function GetPrinterPaperSizes(arg1:string):Promise<Array<{name:string;kind:number;width:number;height:number}>>;
+
 export function GetPrintersList():Promise<Array<string>>;
 
 export function GetSelectedPrinter():Promise<string>;

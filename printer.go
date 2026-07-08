@@ -768,3 +768,59 @@ func safeFileName(value string) string {
 	}
 	return clean
 }
+
+// PaperSizeInfo represents a paper size supported by a printer
+type PaperSizeInfo struct {
+	Name   string `json:"name"`
+	Kind   int    `json:"kind"`
+	Width  int    `json:"width"`  // hundredths of mm
+	Height int    `json:"height"` // hundredths of mm
+}
+
+// GetPrinterPaperSizes queries the printer via PowerShell/System.Drawing for supported paper sizes
+func GetPrinterPaperSizes(printerName string) ([]PaperSizeInfo, error) {
+	if printerName == "" {
+		return nil, fmt.Errorf("nome da impressora vazio")
+	}
+	if runtime.GOOS != "windows" {
+		return nil, fmt.Errorf("consulta de tamanhos so suporta Windows")
+	}
+
+	psScript := fmt.Sprintf(`
+Add-Type -AssemblyName System.Drawing
+$ps = New-Object System.Drawing.Printing.PrinterSettings
+$ps.PrinterName = '%s'
+$ps.PaperSizes | ForEach-Object {
+  "$($_.PaperName)|$($_.Kind)|$($_.Width)|$($_.Height)"
+}
+`, printerName)
+
+	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("falha ao consultar impressora: %s — %s", err, string(output))
+	}
+
+	var sizes []PaperSizeInfo
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Split(line, "|")
+		if len(parts) < 4 {
+			continue
+		}
+		var kind, width, height int
+		fmt.Sscanf(parts[1], "%d", &kind)
+		fmt.Sscanf(parts[2], "%d", &width)
+		fmt.Sscanf(parts[3], "%d", &height)
+		sizes = append(sizes, PaperSizeInfo{
+			Name:   parts[0],
+			Kind:   kind,
+			Width:  width,
+			Height: height,
+		})
+	}
+	return sizes, nil
+}

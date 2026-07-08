@@ -431,6 +431,11 @@ func (a *App) ShouldQuit() bool {
 	return a.allowQuit
 }
 
+// GetPrinterPaperSizes returns supported paper sizes for a printer
+func (a *App) GetPrinterPaperSizes(printerName string) ([]PaperSizeInfo, error) {
+	return GetPrinterPaperSizes(printerName)
+}
+
 func (a *App) shutdown(ctx context.Context) {
 	log.Printf("event=shutdown")
 	if wsManager != nil {
