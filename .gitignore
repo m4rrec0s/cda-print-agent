@@ -6,3 +6,4 @@ defaults.env
 /build/bin/*
 .serena/
 assets/SumatraPDF.exe
+/docs
