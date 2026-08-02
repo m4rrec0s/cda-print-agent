@@ -30,6 +30,33 @@ type SavedArtInfo struct {
 	IsDir      bool   `json:"isDir"`
 }
 
+type DashboardJobFile struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+type DashboardJob struct {
+	ID          string             `json:"id"`
+	Customer    string             `json:"customer"`
+	Status      string             `json:"status"`
+	CreatedAt   string             `json:"createdAt"`
+	UpdatedAt   string             `json:"updatedAt"`
+	PrinterRole string             `json:"printerRole"`
+	Files       []DashboardJobFile `json:"files"`
+	LastError   string             `json:"lastError,omitempty"`
+}
+
+type DashboardSnapshot struct {
+	Status  string         `json:"status"`
+	Photo   string         `json:"photo"`
+	Letter  string         `json:"letter"`
+	Today   int            `json:"today"`
+	Printed int            `json:"printed"`
+	Queued  int            `json:"queued"`
+	Failed  int            `json:"failed"`
+	Jobs    []DashboardJob `json:"jobs"`
+}
+
 func NewApp() *App {
 	return &App{}
 }
@@ -148,6 +175,58 @@ func (a *App) GetStatus() string {
 		return wsManager.ConnectionStatus()
 	}
 	return "disconnected"
+}
+
+func (a *App) GetDashboardSnapshot() DashboardSnapshot {
+	snapshot := DashboardSnapshot{Status: a.GetStatus(), Jobs: []DashboardJob{}}
+	if wsManager == nil {
+		return snapshot
+	}
+
+	cfg := wsManager.GetPrinterConfig()
+	if cfg.Photo != nil {
+		snapshot.Photo = *cfg.Photo
+	}
+	if cfg.Letter != nil {
+		snapshot.Letter = *cfg.Letter
+	}
+	if wsManager.jobStore == nil {
+		return snapshot
+	}
+
+	today := time.Now().Format("2006-01-02")
+	for _, entry := range wsManager.jobStore.dashboardJobs() {
+		if entry.CreatedAt.Format("2006-01-02") == today {
+			snapshot.Today++
+		}
+		switch entry.Status {
+		case jobStatusPrinted:
+			if entry.UpdatedAt.Format("2006-01-02") == today {
+				snapshot.Printed++
+			}
+		case jobStatusReceived, jobStatusPrinting:
+			snapshot.Queued++
+		case jobStatusFailed:
+			if entry.UpdatedAt.Format("2006-01-02") == today {
+				snapshot.Failed++
+			}
+		}
+
+		files := make([]DashboardJobFile, 0, len(entry.Job.Files))
+		role := ""
+		for _, file := range entry.Job.Files {
+			files = append(files, DashboardJobFile{Name: file.Name, Type: file.Type})
+			if role == "" {
+				role = file.PrinterRole
+			}
+		}
+		snapshot.Jobs = append(snapshot.Jobs, DashboardJob{
+			ID: entry.Job.JobID, Customer: entry.Job.CustomerName, Status: entry.Status,
+			CreatedAt: entry.CreatedAt.Format(time.RFC3339), UpdatedAt: entry.UpdatedAt.Format(time.RFC3339),
+			PrinterRole: role, Files: files, LastError: entry.LastError,
+		})
+	}
+	return snapshot
 }
 
 func (a *App) GetPrintersList() []string {

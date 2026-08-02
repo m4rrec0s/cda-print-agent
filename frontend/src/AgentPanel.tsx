@@ -466,12 +466,15 @@ export function AgentPanel({ onReconfigure }: AgentPanelProps) {
   return (
     <main className="shell">
       <header className="topbar">
-        <div className="status">
-          <div className={`status-dot ${status}`} />
-          <span>{statusLabel}</span>
+        <div className="brand-block">
+          <span className="brand">CDA PRINT AGENT</span>
+          <span className="brand-subtitle">Impressão automática</span>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span className="brand">CESTO D'AMORE</span>
+        <div className="topbar-actions">
+          <div className="status">
+            <div className={`status-dot ${status}`} />
+            <span>{statusLabel}</span>
+          </div>
           {onReconfigure && (
             <button
               type="button"
@@ -491,14 +494,14 @@ export function AgentPanel({ onReconfigure }: AgentPanelProps) {
           className={`tab-btn ${activeTab === "panel" ? "active" : ""}`}
           onClick={() => setActiveTab("panel")}
         >
-          PAINEL
+          OPERAÇÃO
         </button>
         <button
           type="button"
           className={`tab-btn ${activeTab === "arts" ? "active" : ""}`}
           onClick={() => setActiveTab("arts")}
         >
-          ARTES
+          ARQUIVOS
         </button>
       </nav>
 

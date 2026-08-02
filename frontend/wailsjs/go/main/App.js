@@ -26,6 +26,10 @@ export function GetAutoStartEnabled() {
   return window['go']['main']['App']['GetAutoStartEnabled']();
 }
 
+export function GetDashboardSnapshot() {
+  return window['go']['main']['App']['GetDashboardSnapshot']();
+}
+
 export function GetPrintSettings() {
   return window['go']['main']['App']['GetPrintSettings']();
 }

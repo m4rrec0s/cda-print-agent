@@ -14,11 +14,13 @@ export function GetAgentConfig():Promise<main.AgentConfig>;
 
 export function GetAutoStartEnabled():Promise<boolean>;
 
+export function GetDashboardSnapshot():Promise<main.DashboardSnapshot>;
+
 export function GetPrintSettings():Promise<Record<string, any>>;
 
 export function GetPrinterConfig():Promise<Record<string, any>>;
 
-export function GetPrinterPaperSizes(arg1:string):Promise<Array<{name:string;kind:number;width:number;height:number}>>;
+export function GetPrinterPaperSizes(arg1:string):Promise<Array<main.PaperSizeInfo>>;
 
 export function GetPrintersList():Promise<Array<string>>;
 

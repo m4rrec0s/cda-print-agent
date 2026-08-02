@@ -15,16 +15,16 @@ import (
 )
 
 type PrintSettings struct {
-	PaperSize    string `json:"paperSize,omitempty"`
-	Orientation  string `json:"orientation,omitempty"`
-	FitToPage    bool   `json:"fitToPage,omitempty"`
-	CustomFlags  string `json:"customFlags,omitempty"`
+	PaperSize   string `json:"paperSize,omitempty"`
+	Orientation string `json:"orientation,omitempty"`
+	FitToPage   bool   `json:"fitToPage,omitempty"`
+	CustomFlags string `json:"customFlags,omitempty"`
 }
 
 type PrinterConfigMap struct {
-	Photo         *string       `json:"photo"`
-	Letter        *string       `json:"letter"`
-	PhotoSettings *PrintSettings `json:"photoSettings,omitempty"`
+	Photo          *string        `json:"photo"`
+	Letter         *string        `json:"letter"`
+	PhotoSettings  *PrintSettings `json:"photoSettings,omitempty"`
 	LetterSettings *PrintSettings `json:"letterSettings,omitempty"`
 }
 
@@ -50,25 +50,24 @@ type WSMessage struct {
 }
 
 type WebSocketManager struct {
-	conn            *websocket.Conn
-	url             string
-	apiURL          string
-	agentKey        string
-	hotFolderPath   string
-	deviceID        string
-	deviceName      string
-	printerConfig   PrinterConfigMap
-	isDefault       bool
-	roleKnown       bool
-	connected       bool
-	connecting      bool
-	done            chan struct{}
-	stopOnce        sync.Once
-	writeMu         sync.Mutex
-	mu              sync.RWMutex
-	statusCh        chan string
-	processedJobs   map[string]bool
-	processedJobsMu sync.RWMutex
+	conn          *websocket.Conn
+	url           string
+	apiURL        string
+	agentKey      string
+	hotFolderPath string
+	deviceID      string
+	deviceName    string
+	printerConfig PrinterConfigMap
+	isDefault     bool
+	roleKnown     bool
+	connected     bool
+	connecting    bool
+	done          chan struct{}
+	stopOnce      sync.Once
+	writeMu       sync.Mutex
+	mu            sync.RWMutex
+	statusCh      chan string
+	jobStore      *printJobStore
 }
 
 var wsManager *WebSocketManager
@@ -82,7 +81,7 @@ func NewWebSocketManager(
 	deviceName string,
 	initialPrinterConfig PrinterConfigMap,
 ) *WebSocketManager {
-	return &WebSocketManager{
+	manager := &WebSocketManager{
 		url:           url,
 		apiURL:        apiURL,
 		agentKey:      agentKey,
@@ -92,8 +91,14 @@ func NewWebSocketManager(
 		printerConfig: initialPrinterConfig,
 		done:          make(chan struct{}),
 		statusCh:      make(chan string, 8),
-		processedJobs: make(map[string]bool),
 	}
+	store, err := newPrintJobStore()
+	if err != nil {
+		log.Printf("event=local_print_queue_unavailable error=%q", err.Error())
+	} else {
+		manager.jobStore = store
+	}
+	return manager
 }
 
 func (wm *WebSocketManager) resolvePrinter(role string) string {
@@ -205,8 +210,24 @@ func (wm *WebSocketManager) Connect() error {
 	if err := wm.SendMessage(msg); err != nil {
 		log.Printf("event=sync_printer_config_failed error=%q", err.Error())
 	}
+	wm.syncPersistedTerminalStatuses()
 
 	return nil
+}
+
+func (wm *WebSocketManager) syncPersistedTerminalStatuses() {
+	if wm.jobStore == nil {
+		return
+	}
+	for _, job := range wm.jobStore.terminalJobs() {
+		messageType := "PRINTED"
+		if job.Status == jobStatusFailed {
+			messageType = "FAILED"
+		}
+		if err := wm.SendMessage(WSMessage{Type: messageType, JobID: job.Job.JobID, Error: job.LastError}); err != nil {
+			log.Printf("event=local_print_status_sync_failed job_id=%s error=%q", job.Job.JobID, err.Error())
+		}
+	}
 }
 
 func (wm *WebSocketManager) IsConnected() bool {
@@ -274,6 +295,12 @@ func (wm *WebSocketManager) StartListening(ctx context.Context) {
 
 	go wm.startPingLoop(ctx)
 	go wm.readLoop(ctx)
+	if wm.jobStore != nil {
+		wm.syncPersistedTerminalStatuses()
+		for _, job := range wm.jobStore.resumableJobs() {
+			go wm.processPersistedJob(ctx, job.JobID)
+		}
+	}
 }
 
 func (wm *WebSocketManager) Stop() {
@@ -384,9 +411,9 @@ func (wm *WebSocketManager) handleGetPaperSizes(ctx context.Context, msg WSMessa
 		sizes = []PaperSizeInfo{}
 	}
 	response := WSMessage{
-		Type:       "PAPER_SIZES_RESPONSE",
+		Type:        "PAPER_SIZES_RESPONSE",
 		PrinterName: printerName,
-		PaperSizes: sizes,
+		PaperSizes:  sizes,
 	}
 	if err := wm.SendMessage(response); err != nil {
 		log.Printf("event=paper_sizes_send_failed error=%q", err.Error())
@@ -498,21 +525,6 @@ func (wm *WebSocketManager) handlePrintJob(ctx context.Context, msg WSMessage) {
 		job.JobID = job.OrderID
 	}
 
-	// Verificar se esse job já foi processado nessa sessão
-	wm.processedJobsMu.RLock()
-	alreadyProcessed := wm.processedJobs[job.JobID]
-	wm.processedJobsMu.RUnlock()
-
-	if alreadyProcessed {
-		log.Printf("event=print_job_skipped reason=already_processed job_id=%s", job.JobID)
-		_ = wm.SendMessage(WSMessage{Type: "PRINTED", JobID: job.JobID})
-		return
-	}
-
-	wm.processedJobsMu.Lock()
-	wm.processedJobs[job.JobID] = true
-	wm.processedJobsMu.Unlock()
-
 	if job.OrderID == "" || job.CustomerName == "" || job.DriveFolderID == "" || len(job.Files) == 0 {
 		errMsg := fmt.Sprintf("payload incompleto: orderId=%q customerName=%q driveFolderId=%q files=%d", job.OrderID, job.CustomerName, job.DriveFolderID, len(job.Files))
 		log.Printf("event=print_job_invalid job_id=%s reason=%q", job.JobID, errMsg)
@@ -529,18 +541,31 @@ func (wm *WebSocketManager) handlePrintJob(ctx context.Context, msg WSMessage) {
 		}
 
 		log.Printf(
-			"event=print_job_file_received job_id=%s index=%d name=%q drive_file_id=%s subfolder=%q type=%s printer_role=%s size=%dx%d label=%q",
+			"event=print_job_file_received job_id=%s index=%d name=%q drive_file_id=%s subfolder=%q type=%s document_type=%s printer_role=%s size=%dx%d label=%q",
 			job.JobID,
 			index,
 			file.Name,
 			file.DriveFileID,
 			file.SubfolderName,
 			file.Type,
+			file.DocumentType,
 			file.PrinterRole,
 			file.SizeConfig.WidthMm,
 			file.SizeConfig.HeightMm,
 			file.SizeConfig.Label,
 		)
+	}
+
+	if wm.jobStore == nil {
+		_ = wm.SendMessage(WSMessage{Type: "FAILED", JobID: job.JobID, Error: "fila local indisponível"})
+		return
+	}
+
+	persisted, shouldStart, err := wm.jobStore.receive(job)
+	if err != nil {
+		log.Printf("event=print_job_persist_failed job_id=%s error=%q", job.JobID, err.Error())
+		_ = wm.SendMessage(WSMessage{Type: "FAILED", JobID: job.JobID, Error: "falha ao persistir fila local"})
+		return
 	}
 
 	if err := wm.SendMessage(WSMessage{Type: "ACK", JobID: job.JobID}); err != nil {
@@ -554,33 +579,49 @@ func (wm *WebSocketManager) handlePrintJob(ctx context.Context, msg WSMessage) {
 		"timestamp": time.Now().Format("15:04:05"),
 	})
 
-	go func() {
-		resolvePrinter := func(role string) string {
-			return wm.resolvePrinter(role)
-		}
-
-		emitBackend := func(stepType string, fileIndex int, errMsg string) {
-			wm.sendFileEvent(ctx, job.JobID, fileIndex, stepType, errMsg)
-		}
-
-		resolvePrintSettings := func(role string) *PrintSettings {
-			return wm.GetPrintSettings(role)
-		}
-
-		err := ProcessPrintJob(ctx, wm.apiURL, wm.agentKey, wm.hotFolderPath, resolvePrinter, resolvePrintSettings, job, func(event JobUIEvent) {
-			runtime.EventsEmit(ctx, "ws:job", event)
-		}, emitBackend)
-
-		if err != nil {
-			log.Printf("event=print_job_failed job_id=%s error=%q", job.JobID, err.Error())
-			_ = wm.SendMessage(WSMessage{Type: "FAILED", JobID: job.JobID, Error: err.Error()})
-			return
-		}
-
-		log.Printf("event=print_job_completed job_id=%s", job.JobID)
+	if persisted.Status == jobStatusPrinted {
+		log.Printf("event=print_job_skipped reason=already_printed job_id=%s", job.JobID)
 		_ = wm.SendMessage(WSMessage{Type: "PRINTED", JobID: job.JobID})
-		_ = wm.SendMessage(WSMessage{Type: "COMPLETED", JobID: job.JobID})
-	}()
+		return
+	}
+	if shouldStart {
+		go wm.processPersistedJob(ctx, job.JobID)
+	}
+}
+
+func (wm *WebSocketManager) processPersistedJob(ctx context.Context, jobID string) {
+	if wm.jobStore == nil {
+		return
+	}
+	job, started, err := wm.jobStore.start(jobID)
+	if err != nil {
+		log.Printf("event=print_job_start_persist_failed job_id=%s error=%q", jobID, err.Error())
+		return
+	}
+	if !started {
+		return
+	}
+
+	resolvePrinter := func(role string) string { return wm.resolvePrinter(role) }
+	emitBackend := func(stepType string, fileIndex int, errMsg string) {
+		wm.sendFileEvent(ctx, job.JobID, fileIndex, stepType, errMsg)
+	}
+	resolvePrintSettings := func(role string) *PrintSettings { return wm.GetPrintSettings(role) }
+	err = ProcessPrintJob(ctx, wm.apiURL, wm.agentKey, wm.hotFolderPath, resolvePrinter, resolvePrintSettings, job, func(event JobUIEvent) {
+		runtime.EventsEmit(ctx, "ws:job", event)
+	}, emitBackend)
+	if persistErr := wm.jobStore.complete(job.JobID, err); persistErr != nil {
+		log.Printf("event=print_job_complete_persist_failed job_id=%s error=%q", job.JobID, persistErr.Error())
+	}
+	if err != nil {
+		log.Printf("event=print_job_failed job_id=%s error=%q", job.JobID, err.Error())
+		_ = wm.SendMessage(WSMessage{Type: "FAILED", JobID: job.JobID, Error: err.Error()})
+		return
+	}
+
+	log.Printf("event=print_job_completed job_id=%s", job.JobID)
+	_ = wm.SendMessage(WSMessage{Type: "PRINTED", JobID: job.JobID})
+	_ = wm.SendMessage(WSMessage{Type: "COMPLETED", JobID: job.JobID})
 }
 
 func (wm *WebSocketManager) startPingLoop(ctx context.Context) {

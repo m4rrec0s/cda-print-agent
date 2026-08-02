@@ -38,10 +38,10 @@ func main() {
 
 	err := wails.Run(&options.App{
 		Title:     "CdA: Print Agent",
-		Width:     520,
-		Height:    760,
-		MinWidth:  480,
-		MinHeight: 680,
+		Width:     460,
+		Height:    640,
+		MinWidth:  390,
+		MinHeight: 500,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},

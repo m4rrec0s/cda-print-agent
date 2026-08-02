@@ -3,6 +3,7 @@ import { IsConfigured, GetVersion } from "../wailsjs/go/main/App";
 import "./App.css";
 import { SetupWizard } from "./SetupWizard";
 import { AgentPanel } from "./AgentPanel";
+import { Dashboard } from "./Dashboard";
 import { SettingsPage } from "./SettingsPage";
 import { ThemePage } from "./ThemePage";
 import { AboutPage } from "./AboutPage";
@@ -99,7 +100,7 @@ export default function App() {
 
   return (
     <ThemeProvider>
-      <AgentPanel onReconfigure={() => setView("settings")} />
+      <Dashboard onConfigure={() => setView("settings")} />
     </ThemeProvider>
   );
 }

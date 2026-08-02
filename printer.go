@@ -41,6 +41,7 @@ type PrintJobFile struct {
 	Type          string     `json:"type"`
 	PrinterRole   string     `json:"printerRole"`
 	SizeConfig    SizeConfig `json:"sizeConfig"`
+	DocumentType  string     `json:"documentType,omitempty"`
 }
 
 type PrintJob struct {
