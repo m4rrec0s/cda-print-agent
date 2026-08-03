@@ -36,6 +36,10 @@ func main() {
 
 	app := NewApp()
 
+	// Systray precisa ser iniciado numa goroutine própria ANTES do boot do Wails.
+	// Veja startTray em app.go para a explicação do conflito de threads.
+	app.startTray()
+
 	err := wails.Run(&options.App{
 		Title:     "CdA: Print Agent",
 		Width:     460,

@@ -17,6 +17,7 @@ import (
 type App struct {
 	ctx          context.Context
 	tray         *TrayManager
+	statusCh     chan string
 	allowQuit    bool
 	updateCancel context.CancelFunc
 	mu           sync.RWMutex
@@ -61,6 +62,35 @@ func NewApp() *App {
 	return &App{}
 }
 
+// startTray inicializa o systray numa goroutine própria, ANTES do wails.Run.
+// O Wails v2 e o fyne.io/systray disputam a thread principal (o pacote systray
+// chama runtime.LockOSThread no init). Iniciar de dentro do OnStartup fazia a
+// janela/message loop do tray ficarem numa thread que não recebia WM_RBUTTONUP,
+// e o menu de clique direito nunca abria.
+func (a *App) startTray() {
+	if a.statusCh == nil {
+		a.statusCh = make(chan string, 8)
+	}
+	a.tray = NewTrayManager(a.statusCh)
+	a.tray.Start(a)
+}
+
+// bridgeStatusUpdates repassa os status do WebSocket para o canal do tray.
+// O wsManager só existe após o startup/config, então o bridge é instalado aqui.
+func (a *App) bridgeStatusUpdates() {
+	if wsManager == nil {
+		return
+	}
+	go func() {
+		for s := range wsManager.StatusUpdates() {
+			select {
+			case a.statusCh <- s:
+			default:
+			}
+		}
+	}()
+}
+
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 
@@ -84,8 +114,7 @@ func (a *App) startup(ctx context.Context) {
 		cfg.WSURL, cfg.APIURL, cfg.HotFolderPath != "")
 
 	wsManager = NewWebSocketManager(cfg.WSURL, cfg.APIURL, cfg.AgentKey, cfg.HotFolderPath, cfg.DeviceID, cfg.DeviceName, cfg.ToPrinterConfig())
-	a.tray = NewTrayManager(wsManager.StatusUpdates())
-	a.tray.Start(a)
+	a.bridgeStatusUpdates()
 
 	if err := wsManager.Connect(); err != nil {
 		log.Printf("event=websocket_initial_connection_failed error=%q", err.Error())
@@ -149,10 +178,7 @@ func (a *App) SaveAgentConfig(wsURL string, apiURL string, agentKey string, hotF
 	}
 
 	wsManager = NewWebSocketManager(cfg.WSURL, cfg.APIURL, cfg.AgentKey, cfg.HotFolderPath, cfg.DeviceID, cfg.DeviceName, cfg.ToPrinterConfig())
-	if a.tray == nil {
-		a.tray = NewTrayManager(wsManager.StatusUpdates())
-		a.tray.Start(a)
-	}
+	a.bridgeStatusUpdates()
 	wailsruntime.EventsEmit(a.ctx, "ws:status", "connecting")
 	if err := wsManager.Connect(); err != nil {
 		log.Printf("event=websocket_connect_after_config_failed error=%q", err.Error())
