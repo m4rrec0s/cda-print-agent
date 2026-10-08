@@ -13,6 +13,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
+VERSION="${1:-$(node -p 'require("./wails.json").info.productVersion')}"
+
+if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "Versao invalida: $VERSION (use MAJOR.MINOR.PATCH)" >&2
+  exit 1
+fi
 
 echo "==> Compilando frontend..."
 cd frontend
@@ -21,7 +27,7 @@ npm run build
 cd ..
 
 echo "==> Buildando para Windows amd64..."
-wails build -platform windows/amd64 -o CdAPrintAgent.exe -clean
+wails build -platform windows/amd64 -o CdAPrintAgent.exe -clean -ldflags "-X main.Version=$VERSION"
 
 OUTPUT_DIR="$SCRIPT_DIR/build/bin"
 echo ""

@@ -17,7 +17,7 @@ import (
 var assets embed.FS
 
 var mainWindowCtx context.Context
-var Version = "dev"
+var Version = "1.3.0"
 
 func main() {
 	isFirst, lockHandle := AcquireSingleInstanceLock()
