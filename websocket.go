@@ -71,6 +71,7 @@ type WebSocketManager struct {
 }
 
 var wsManager *WebSocketManager
+var printExecutionMu sync.Mutex
 
 func NewWebSocketManager(
 	url string,
@@ -157,7 +158,25 @@ func (wm *WebSocketManager) ConnectionStatus() string {
 }
 
 func (wm *WebSocketManager) Connect() error {
-	wm.setConnecting(true)
+	select {
+	case <-wm.done:
+		return fmt.Errorf("websocket manager stopped")
+	default:
+	}
+
+	wm.mu.Lock()
+	if wm.connected {
+		wm.mu.Unlock()
+		return nil
+	}
+	if wm.connecting {
+		wm.mu.Unlock()
+		return fmt.Errorf("websocket connection already in progress")
+	}
+	wm.connecting = true
+	wm.mu.Unlock()
+	wm.emitStatus("connecting")
+
 	headers := http.Header{}
 	if wm.agentKey != "" {
 		headers.Set("X-Agent-Key", wm.agentKey)
@@ -168,6 +187,13 @@ func (wm *WebSocketManager) Connect() error {
 	if err != nil {
 		wm.setConnected(false)
 		return err
+	}
+	select {
+	case <-wm.done:
+		_ = conn.Close()
+		wm.setConnected(false)
+		return fmt.Errorf("websocket manager stopped")
+	default:
 	}
 
 	wm.mu.Lock()
@@ -191,7 +217,6 @@ func (wm *WebSocketManager) Connect() error {
 
 	log.Printf("event=websocket_connected url=%s", wm.url)
 
-	// Send HANDSHAKE to identify this device
 	handshakeData, _ := json.Marshal(map[string]string{
 		"type":       "HANDSHAKE",
 		"deviceId":   wm.deviceID,
@@ -202,7 +227,6 @@ func (wm *WebSocketManager) Connect() error {
 	_ = conn.WriteMessage(websocket.TextMessage, handshakeData)
 	wm.writeMu.Unlock()
 
-	// Request printer config from backend on connection
 	msg := WSMessage{
 		Type:      "SYNC_PRINTER_CONFIG",
 		Timestamp: time.Now().Format(time.RFC3339),
@@ -319,7 +343,11 @@ func (wm *WebSocketManager) readLoop(ctx context.Context) {
 		}
 
 		if !wm.IsConnected() {
-			time.Sleep(5 * time.Second)
+			select {
+			case <-wm.done:
+				return
+			case <-time.After(5 * time.Second):
+			}
 			runtime.EventsEmit(ctx, "ws:status", "connecting")
 			if err := wm.Connect(); err != nil {
 				log.Printf("event=websocket_reconnect_failed error=%q", err.Error())
@@ -593,6 +621,10 @@ func (wm *WebSocketManager) processPersistedJob(ctx context.Context, jobID strin
 	if wm.jobStore == nil {
 		return
 	}
+
+	printExecutionMu.Lock()
+	defer printExecutionMu.Unlock()
+
 	job, started, err := wm.jobStore.start(jobID)
 	if err != nil {
 		log.Printf("event=print_job_start_persist_failed job_id=%s error=%q", jobID, err.Error())
@@ -604,6 +636,11 @@ func (wm *WebSocketManager) processPersistedJob(ctx context.Context, jobID strin
 
 	resolvePrinter := func(role string) string { return wm.resolvePrinter(role) }
 	emitBackend := func(stepType string, fileIndex int, errMsg string) {
+		if stepType == "FILE_PRINTED" && wm.jobStore != nil {
+			if err := wm.jobStore.markFileComplete(job.JobID, fileIndex); err != nil {
+				log.Printf("event=print_job_checkpoint_failed job_id=%s file_index=%d error=%q", job.JobID, fileIndex, err.Error())
+			}
+		}
 		wm.sendFileEvent(ctx, job.JobID, fileIndex, stepType, errMsg)
 	}
 	resolvePrintSettings := func(role string) *PrintSettings { return wm.GetPrintSettings(role) }

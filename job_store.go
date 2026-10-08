@@ -11,18 +11,20 @@ import (
 )
 
 const (
-	jobStatusReceived = "RECEIVED"
-	jobStatusPrinting = "PRINTING"
-	jobStatusPrinted  = "PRINTED"
-	jobStatusFailed   = "FAILED"
+	jobStatusReceived         = "RECEIVED"
+	jobStatusPrinting         = "PRINTING"
+	jobStatusPrinted          = "PRINTED"
+	jobStatusFailed           = "FAILED"
+	localTerminalJobRetention = 90 * 24 * time.Hour
 )
 
 type persistedPrintJob struct {
-	Job       PrintJob  `json:"job"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"createdAt"`
-	LastError string    `json:"lastError,omitempty"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	Job            PrintJob  `json:"job"`
+	Status         string    `json:"status"`
+	CreatedAt      time.Time `json:"createdAt"`
+	LastError      string    `json:"lastError,omitempty"`
+	CompletedFiles []int     `json:"completedFiles,omitempty"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
 type printJobStore struct {
@@ -46,7 +48,13 @@ func newPrintJobStore() (*printJobStore, error) {
 	if err := json.Unmarshal(data, &store.jobs); err != nil {
 		return nil, fmt.Errorf("decode local print queue: %w", err)
 	}
+
+	retentionCutoff := time.Now().Add(-localTerminalJobRetention)
 	for id, entry := range store.jobs {
+		if (entry.Status == jobStatusPrinted || entry.Status == jobStatusFailed) && !entry.UpdatedAt.IsZero() && entry.UpdatedAt.Before(retentionCutoff) {
+			delete(store.jobs, id)
+			continue
+		}
 		if entry.Status == jobStatusPrinting {
 			entry.Status = jobStatusReceived
 			entry.LastError = "Agente reiniciado durante impressão; job será retomado"
@@ -64,20 +72,29 @@ func (store *printJobStore) receive(job PrintJob) (persistedPrintJob, bool, erro
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	if existing, ok := store.jobs[job.JobID]; ok {
-		if existing.Status == jobStatusFailed {
-			existing.Status = jobStatusReceived
-			existing.LastError = ""
-			existing.UpdatedAt = time.Now()
-			existing.Job = job
-			store.jobs[job.JobID] = existing
-			return existing, true, store.saveLocked()
+		if existing.Status != jobStatusFailed {
+			return existing, false, nil
 		}
-		return existing, false, nil
+		updated := existing
+		updated.Status = jobStatusReceived
+		updated.LastError = ""
+		updated.UpdatedAt = time.Now()
+		updated.Job = job
+		store.jobs[job.JobID] = updated
+		if err := store.saveLocked(); err != nil {
+			store.jobs[job.JobID] = existing
+			return existing, false, err
+		}
+		return updated, true, nil
 	}
 	now := time.Now()
 	entry := persistedPrintJob{Job: job, Status: jobStatusReceived, CreatedAt: now, UpdatedAt: now}
 	store.jobs[job.JobID] = entry
-	return entry, true, store.saveLocked()
+	if err := store.saveLocked(); err != nil {
+		delete(store.jobs, job.JobID)
+		return persistedPrintJob{}, false, err
+	}
+	return entry, true, nil
 }
 
 func (store *printJobStore) dashboardJobs() []persistedPrintJob {
@@ -101,11 +118,17 @@ func (store *printJobStore) start(jobID string) (PrintJob, bool, error) {
 	if !ok || entry.Status != jobStatusReceived {
 		return PrintJob{}, false, nil
 	}
+	previous := entry
 	entry.Status = jobStatusPrinting
 	entry.LastError = ""
 	entry.UpdatedAt = time.Now()
 	store.jobs[jobID] = entry
-	return entry.Job, true, store.saveLocked()
+	if err := store.saveLocked(); err != nil {
+		store.jobs[jobID] = previous
+		return PrintJob{}, false, err
+	}
+	entry.Job.CompletedFiles = append([]int(nil), entry.CompletedFiles...)
+	return entry.Job, true, nil
 }
 
 func (store *printJobStore) complete(jobID string, err error) error {
@@ -115,6 +138,7 @@ func (store *printJobStore) complete(jobID string, err error) error {
 	if !ok {
 		return fmt.Errorf("local print job %s not found", jobID)
 	}
+	previous := entry
 	entry.UpdatedAt = time.Now()
 	if err != nil {
 		entry.Status = jobStatusFailed
@@ -124,7 +148,37 @@ func (store *printJobStore) complete(jobID string, err error) error {
 		entry.LastError = ""
 	}
 	store.jobs[jobID] = entry
-	return store.saveLocked()
+	if saveErr := store.saveLocked(); saveErr != nil {
+		store.jobs[jobID] = previous
+		return saveErr
+	}
+	return nil
+}
+
+func (store *printJobStore) markFileComplete(jobID string, fileIndex int) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	entry, ok := store.jobs[jobID]
+	if !ok {
+		return fmt.Errorf("local print job %s not found", jobID)
+	}
+	if fileIndex < 0 || fileIndex >= len(entry.Job.Files) {
+		return fmt.Errorf("file index %d outside local print job %s", fileIndex, jobID)
+	}
+	for _, completed := range entry.CompletedFiles {
+		if completed == fileIndex {
+			return nil
+		}
+	}
+	previous := entry
+	entry.CompletedFiles = append(entry.CompletedFiles, fileIndex)
+	entry.UpdatedAt = time.Now()
+	store.jobs[jobID] = entry
+	if err := store.saveLocked(); err != nil {
+		store.jobs[jobID] = previous
+		return err
+	}
+	return nil
 }
 
 func (store *printJobStore) resumableJobs() []PrintJob {
@@ -161,9 +215,31 @@ func (store *printJobStore) saveLocked() error {
 	if err != nil {
 		return err
 	}
-	temp := store.path + ".tmp"
-	if err := os.WriteFile(temp, data, 0600); err != nil {
-		return err
+
+	tempFile, err := os.CreateTemp(filepath.Dir(store.path), ".print-jobs-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temporary print queue: %w", err)
 	}
-	return os.Rename(temp, store.path)
+	tempPath := tempFile.Name()
+	defer os.Remove(tempPath)
+
+	if err := tempFile.Chmod(0600); err != nil {
+		_ = tempFile.Close()
+		return fmt.Errorf("secure temporary print queue: %w", err)
+	}
+	if _, err := tempFile.Write(data); err != nil {
+		_ = tempFile.Close()
+		return fmt.Errorf("write temporary print queue: %w", err)
+	}
+	if err := tempFile.Sync(); err != nil {
+		_ = tempFile.Close()
+		return fmt.Errorf("sync temporary print queue: %w", err)
+	}
+	if err := tempFile.Close(); err != nil {
+		return fmt.Errorf("close temporary print queue: %w", err)
+	}
+	if err := os.Rename(tempPath, store.path); err != nil {
+		return fmt.Errorf("replace print queue: %w", err)
+	}
+	return nil
 }

@@ -45,11 +45,12 @@ type PrintJobFile struct {
 }
 
 type PrintJob struct {
-	JobID         string         `json:"jobId,omitempty"`
-	OrderID       string         `json:"orderId"`
-	CustomerName  string         `json:"customerName"`
-	DriveFolderID string         `json:"driveFolderId"`
-	Files         []PrintJobFile `json:"files"`
+	JobID          string         `json:"jobId,omitempty"`
+	OrderID        string         `json:"orderId"`
+	CustomerName   string         `json:"customerName"`
+	DriveFolderID  string         `json:"driveFolderId"`
+	Files          []PrintJobFile `json:"files"`
+	CompletedFiles []int          `json:"-"` // Local durable checkpoints; never sent over the wire.
 }
 
 type JobFileStatus struct {
@@ -171,19 +172,29 @@ func ProcessPrintJob(
 	}
 	defer os.RemoveAll(jobDir)
 
+	completedFiles := make(map[int]struct{}, len(job.CompletedFiles))
+	for _, index := range job.CompletedFiles {
+		if index >= 0 && index < len(job.Files) {
+			completedFiles[index] = struct{}{}
+		}
+	}
+
 	statuses := make([]JobFileStatus, len(job.Files))
 	for index, file := range job.Files {
-		statuses[index] = JobFileStatus{
-			Name:   file.Name,
-			Type:   file.Type,
-			Status: "pending",
+		status := "pending"
+		if _, completed := completedFiles[index]; completed {
+			status = "printed"
 		}
+		statuses[index] = JobFileStatus{Name: file.Name, Type: file.Type, Status: status}
 	}
 
 	emitJobEvent(emit, job, "started", "received", "Job recebido pelo agente", statuses)
 	downloadedPaths := make([]string, len(job.Files))
 
 	for index, file := range job.Files {
+		if _, completed := completedFiles[index]; completed {
+			continue
+		}
 		statuses[index].Status = "downloading"
 		emitJobEvent(emit, job, "file", "downloading", fmt.Sprintf("Baixando %s", file.Name), statuses)
 		onStep("DOWNLOADING", index, "")
@@ -203,11 +214,12 @@ func ProcessPrintJob(
 		downloadedPaths[index] = tempPath
 	}
 
-	// Check if any file needs PDF fallback
 	needsPDFFallback := false
-	for _, file := range job.Files {
-		printerName := resolvePrinter(file.PrinterRole)
-		if printerName == "pdf_fallback" {
+	for index, file := range job.Files {
+		if _, completed := completedFiles[index]; completed {
+			continue
+		}
+		if resolvePrinter(file.PrinterRole) == "pdf_fallback" {
 			needsPDFFallback = true
 			break
 		}
@@ -231,6 +243,9 @@ func handlePDFFallback(
 	onStep StepCallback,
 ) error {
 	for index, file := range job.Files {
+		if statuses[index].Status == "printed" {
+			continue
+		}
 		statuses[index].Status = "generating_pdf"
 		emitJobEvent(emit, job, "file", "generating_pdf", fmt.Sprintf("Gerando PDF: %s", file.Name), statuses)
 		onStep("GENERATING_PDF", index, "")
@@ -247,6 +262,7 @@ func handlePDFFallback(
 		statuses[index].Status = "pdf_generated"
 		emitJobEvent(emit, job, "file", "pdf_generated", fmt.Sprintf("PDF gerado: %s", file.Name), statuses)
 		onStep("PDF_GENERATED", index, "")
+		onStep("FILE_PRINTED", index, "")
 	}
 
 	emitJobEvent(emit, job, "completed", "printed", "PDFs gerados com sucesso (fallback)", statuses)
@@ -439,6 +455,9 @@ func handlePrintToFolder(
 	resolvePrintSettings PrintSettingsResolver,
 ) error {
 	for index, file := range job.Files {
+		if statuses[index].Status == "printed" {
+			continue
+		}
 		printerName := resolvePrinter(file.PrinterRole)
 		log.Printf("event=resolve_printer role=%s printer=%q file=%q", file.PrinterRole, printerName, file.Name)
 
@@ -631,8 +650,16 @@ func downloadDriveFile(
 	}
 	defer out.Close()
 
-	if _, err := io.Copy(out, resp.Body); err != nil {
+	const maxPrintFileSize = 100 << 20 // 100 MiB per source file.
+	written, err := io.Copy(out, io.LimitReader(resp.Body, maxPrintFileSize+1))
+	if err != nil {
 		return "", fmt.Errorf("salvar download temporario: %w", err)
+	}
+	if written > maxPrintFileSize {
+		return "", fmt.Errorf("arquivo %s excede limite de %d MiB", file.Name, maxPrintFileSize>>20)
+	}
+	if err := out.Sync(); err != nil {
+		return "", fmt.Errorf("sincronizar download temporario: %w", err)
 	}
 
 	log.Printf("event=file_downloaded job_id=%s file=%q path=%q", jobID, file.Name, tempPath)
@@ -685,9 +712,10 @@ func moveToHotFolder(tempPath string, hotFolderPath string, jobID string, file P
 	destinationName := safeFileName(fmt.Sprintf("%s_%s_%s", jobID, file.Type, file.Name))
 	destinationPath := filepath.Join(hotFolderPath, destinationName)
 
-	if err := os.Rename(tempPath, destinationPath); err == nil {
-		log.Printf("event=file_moved_to_hot_folder job_id=%s file=%q destination=%q", jobID, file.Name, destinationPath)
-		return destinationPath, nil
+	if _, err := os.Lstat(destinationPath); err == nil {
+		return "", fmt.Errorf("arquivo de destino ja existe: %s", destinationPath)
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("verificar destino no hot folder: %w", err)
 	}
 
 	source, err := os.Open(tempPath)
@@ -696,21 +724,36 @@ func moveToHotFolder(tempPath string, hotFolderPath string, jobID string, file P
 	}
 	defer source.Close()
 
-	destination, err := os.Create(destinationPath)
+	staging, err := os.CreateTemp(hotFolderPath, ".cda-print-*.tmp")
 	if err != nil {
-		return "", fmt.Errorf("criar arquivo no hot folder: %w", err)
+		return "", fmt.Errorf("criar arquivo temporario no hot folder: %w", err)
 	}
-	defer destination.Close()
+	stagingPath := staging.Name()
+	defer os.Remove(stagingPath)
 
-	if _, err := io.Copy(destination, source); err != nil {
+	if _, err := io.Copy(staging, source); err != nil {
+		_ = staging.Close()
 		return "", fmt.Errorf("copiar arquivo para hot folder: %w", err)
 	}
-
-	if err := os.Remove(tempPath); err != nil {
+	if err := staging.Chmod(0644); err != nil {
+		_ = staging.Close()
+		return "", fmt.Errorf("definir permissao do arquivo no hot folder: %w", err)
+	}
+	if err := staging.Sync(); err != nil {
+		_ = staging.Close()
+		return "", fmt.Errorf("sincronizar arquivo no hot folder: %w", err)
+	}
+	if err := staging.Close(); err != nil {
+		return "", fmt.Errorf("fechar arquivo no hot folder: %w", err)
+	}
+	if err := os.Rename(stagingPath, destinationPath); err != nil {
+		return "", fmt.Errorf("publicar arquivo no hot folder: %w", err)
+	}
+	if err := os.Remove(tempPath); err != nil && !os.IsNotExist(err) {
 		log.Printf("event=temp_file_remove_failed path=%q error=%q", tempPath, err.Error())
 	}
 
-	log.Printf("event=file_copied_to_hot_folder job_id=%s file=%q destination=%q", jobID, file.Name, destinationPath)
+	log.Printf("event=file_moved_to_hot_folder job_id=%s file=%q destination=%q", jobID, file.Name, destinationPath)
 	return destinationPath, nil
 }
 

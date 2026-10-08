@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -78,14 +79,21 @@ func (a *App) startTray() {
 // bridgeStatusUpdates repassa os status do WebSocket para o canal do tray.
 // O wsManager só existe após o startup/config, então o bridge é instalado aqui.
 func (a *App) bridgeStatusUpdates() {
-	if wsManager == nil {
+	manager := wsManager
+	if manager == nil {
 		return
 	}
 	go func() {
-		for s := range wsManager.StatusUpdates() {
+		statuses := manager.StatusUpdates()
+		for {
 			select {
-			case a.statusCh <- s:
-			default:
+			case <-manager.done:
+				return
+			case status := <-statuses:
+				select {
+				case a.statusCh <- status:
+				default:
+				}
 			}
 		}
 	}()
@@ -172,23 +180,26 @@ func (a *App) SaveAgentConfig(wsURL string, apiURL string, agentKey string, hotF
 	if err := ValidateConfig(&cfg); err != nil {
 		return err
 	}
-
 	if err := SaveConfigFile(cfg); err != nil {
 		return err
 	}
 
+	if wsManager != nil {
+		wsManager.Stop()
+	}
 	wsManager = NewWebSocketManager(cfg.WSURL, cfg.APIURL, cfg.AgentKey, cfg.HotFolderPath, cfg.DeviceID, cfg.DeviceName, cfg.ToPrinterConfig())
 	a.bridgeStatusUpdates()
-	wailsruntime.EventsEmit(a.ctx, "ws:status", "connecting")
-	if err := wsManager.Connect(); err != nil {
-		log.Printf("event=websocket_connect_after_config_failed error=%q", err.Error())
-		wailsruntime.EventsEmit(a.ctx, "ws:status", "disconnected")
-		return err
-	}
-	wailsruntime.EventsEmit(a.ctx, "ws:status", wsManager.ConnectionStatus())
-	wsManager.StartListening(a.ctx)
 	a.startUpdateTicker(a.ctx, cfg.APIURL, cfg.AgentKey)
-	return nil
+	wailsruntime.EventsEmit(a.ctx, "ws:status", "connecting")
+	connectErr := wsManager.Connect()
+	if connectErr != nil {
+		log.Printf("event=websocket_connect_after_config_failed error=%q", connectErr.Error())
+		wailsruntime.EventsEmit(a.ctx, "ws:status", "disconnected")
+	} else {
+		wailsruntime.EventsEmit(a.ctx, "ws:status", wsManager.ConnectionStatus())
+	}
+	wsManager.StartListening(a.ctx)
+	return connectErr
 }
 
 // ── Existing bindings (preservados) ──────────────────
@@ -410,16 +421,28 @@ func (a *App) GetSelectedPrinter() string {
 }
 
 func (a *App) Reconnect() error {
-	if wsManager == nil {
-		return nil
+	cfg, err := LoadConfigFromFile()
+	if err != nil {
+		return fmt.Errorf("load agent configuration: %w", err)
+	}
+	if err := ValidateConfig(cfg); err != nil {
+		return err
 	}
 
-	wsManager.Close()
+	if wsManager != nil {
+		wsManager.Stop()
+	}
+	wsManager = NewWebSocketManager(cfg.WSURL, cfg.APIURL, cfg.AgentKey, cfg.HotFolderPath, cfg.DeviceID, cfg.DeviceName, cfg.ToPrinterConfig())
+	a.bridgeStatusUpdates()
 	wailsruntime.EventsEmit(a.ctx, "ws:status", "connecting")
-	if err := wsManager.Connect(); err != nil {
-		log.Printf("event=websocket_reconnect_failed error=%q", err.Error())
+	connectErr := wsManager.Connect()
+	if connectErr != nil {
+		log.Printf("event=websocket_reconnect_failed error=%q", connectErr.Error())
 		wailsruntime.EventsEmit(a.ctx, "ws:status", "disconnected")
-		return err
+	}
+	wsManager.StartListening(a.ctx)
+	if connectErr != nil {
+		return connectErr
 	}
 	wailsruntime.EventsEmit(a.ctx, "ws:status", wsManager.ConnectionStatus())
 	return nil
@@ -443,7 +466,7 @@ func (a *App) CheckUpdate() (*VersionInfo, error) {
 }
 
 func (a *App) ApplyUpdateAndRestart(downloadURL string) error {
-	log.Printf("event=update_started download_url=%s", downloadURL)
+	log.Printf("event=update_started")
 
 	if err := ApplyUpdate(downloadURL); err != nil {
 		log.Printf("event=update_failed error=%q", err.Error())
